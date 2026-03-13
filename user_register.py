@@ -4,7 +4,7 @@ from PIL import Image, ImageTk
 import math
 from user_viewsTest import UsersView # IMPORTACIÓN DE LA NUEVA VISTA
 # --- PALETA DE COLORES ---
-COLOR_BG_DARK = "#334155"      # Azul oscuro
+COLOR_BG_DARK = "#20334D"      # Azul oscuro
 COLOR_BG_WHITE = "#FFFFFF"     # Blanco
 COLOR_CARD = "#A4BFDA"         # Tarjeta azul claro
 COLOR_INPUT_BG = "#FFFFFF"     
@@ -176,7 +176,7 @@ class RegistroApp(ctk.CTk):
         self.status_icon = ctk.CTkLabel(
             self.status_container, 
             text="⚠️", 
-            font=("Inter", 20), 
+            font=("Inter", 22), 
             text_color="#EAB308"
         )
         self.status_icon.pack(side="left", padx=5)
@@ -184,8 +184,8 @@ class RegistroApp(ctk.CTk):
         # Texto (Siempre negro o gris oscuro)
         self.status_text = ctk.CTkLabel(
             self.status_container, 
-            text="POR FAVOR CAPTURA TU ROSTRO", 
-            font=("Inter", 16, "bold"), 
+            text="Por favor capturar el rostro", 
+            font=("Inter", 22, "bold"), 
             text_color="black"
         )
         self.status_text.pack(side="left")
@@ -208,7 +208,7 @@ class RegistroApp(ctk.CTk):
             text="Aceptar",
             hover_color="#0F172A", 
             fg_color=COLOR_BTN_ACTION, 
-            height=45,           # <--- ALTURA: Sube este valor para botones más altos
+            height=50,           # <--- ALTURA: Sube este valor para botones más altos
             width=190,          # <--- ANCHURA: Añade este parámetro para un ancho fijo
             corner_radius=15, 
             font=("Inter", 16, "bold"), # <--- LETRA: Cambia el 16 para el tamaño y "bold" por "normal" si prefieres
@@ -223,7 +223,7 @@ class RegistroApp(ctk.CTk):
             text="Cancelar", 
             hover_color="#0F172A",
             fg_color=COLOR_BTN_ACTION, 
-            height=45,           # <--- ALTURA: Debe ser igual al de Aceptar para simetría
+            height=50,           # <--- ALTURA: Debe ser igual al de Aceptar para simetría
             width=190,          # <--- ANCHURA: Igual al anterior
             corner_radius=15, 
             font=("Inter", 16, "bold"), # <--- LETRA: Ajusta el tamaño aquí también
@@ -317,63 +317,90 @@ class RegistroApp(ctk.CTk):
         self.checar_boton_registro()
 
     def iniciar_loading(self):
-
         self.loading_frames = []
-
-        gif = Image.open("loading.gif")
-
         try:
+            gif = Image.open("loading.gif")
             while True:
-                frame = gif.copy().resize((42, 42), Image.Resampling.LANCZOS)
-                frame = ImageTk.PhotoImage(frame)
-                self.loading_frames.append(frame)
+                # Redimensionar cada frame
+                frame = gif.copy().resize((65, 65), Image.Resampling.LANCZOS)
+                self.loading_frames.append(ImageTk.PhotoImage(frame))
                 gif.seek(len(self.loading_frames))
         except EOFError:
             pass
 
-        # ocultar icono y texto
-        self.status_icon.pack_forget()
-        self.status_text.pack_forget()
+        # Limpiar el contenedor de estado
+        for widget in self.status_container.winfo_children():
+            widget.pack_forget()
 
-        # mostrar gif
-        self.loading_label = ctk.CTkLabel(self.status_container, text="")
-        self.loading_label.pack(side="left", padx=5)
+        # 1. Crear el label para el GIF (Asegúrate de que no tenga texto)
+        self.loading_label = ctk.CTkLabel(self.status_container, text="", image=None)
+        self.loading_label.pack(side="left", padx=(10, 5))
+
+        # 2. Crear el label para el texto
+        self.loading_text = ctk.CTkLabel(
+            self.status_container, 
+            text="Cargando registro...", 
+            font=("Inter", 20, "bold"),
+            text_color="#64748B"
+        )
+        self.loading_text.pack(side="left", padx=(5, 10))
 
         self.loading_index = 0
         self.animar_gif()
 
     def animar_gif(self):
+        # Verificar que el widget todavía exista antes de animar
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            frame = self.loading_frames[self.loading_index]
+            
+            # Configurar la imagen directamente
+            self.loading_label.configure(image=frame)
+            
+            # Incrementar índice
+            self.loading_index = (self.loading_index + 1) % len(self.loading_frames)
+            
+            # Re-llamar a la animación (80ms es una buena velocidad)
+            self.after(80, self.animar_gif)
 
-        frame = self.loading_frames[self.loading_index]
-
-        self.loading_label.configure(image=frame)
-
-        self.loading_index += 1
-
-        if self.loading_index == len(self.loading_frames):
-            self.loading_index = 0
-
-        self.after(80, self.animar_gif)
-    
     def mostrar_exito(self):
+        # 1. Eliminar los widgets de carga (GIF grande y texto)
+        if hasattr(self, 'loading_label'): self.loading_label.destroy()
+        if hasattr(self, 'loading_text'): self.loading_text.destroy()
 
-        self.loading_label.destroy()
-
-        # volver a mostrar icono
-        self.status_icon.pack(side="left", padx=5)
-
-        self.status_icon.configure(
-            text="✔",
-            text_color="#18BB54"
-        )
-
+        # 2. Re-empaquetar los widgets originales de estado
+        # Aumentamos el padx a (10, 15) para dar más aire al GIF festivo
+        self.status_icon.pack(side="left", padx=(10, 15)) 
         self.status_text.pack(side="left")
+
+        # 3. Configurar el estado final verde con la fuente festiva
+        self.status_icon.configure(text="") # Limpiamos cualquier check previo
+        
         self.status_text.configure(
-            text="REGISTRO COMPLETADO",
-            text_color="#18BB54"
+            text="Registro completado", 
+            text_color="#64748B",
+            font=("Inter", 24, "bold") # Aumentamos un poco la fuente para celebrar
         )
 
-        self.after(1500, self.ir_a_lista_usuarios)
+        # 4. CARGAR Y PREPARAR EL GIF DE CONFETI
+        # Asegúrate de tener el archivo "celebration.gif" en tu carpeta
+        self.success_frames = []
+        try:
+            gif_confeti = Image.open("celebration.gif")
+            while True:
+                # Escalamos el GIF para que sea un icono grande y festivo (ej: 50x50)
+                frame = gif_confeti.copy().resize((50, 50), Image.Resampling.LANCZOS)
+                self.success_frames.append(ImageTk.PhotoImage(frame))
+                gif_confeti.seek(len(self.success_frames))
+        except EOFError:
+            pass
+
+        # 5. Iniciar la animación del confeti
+        if hasattr(self, 'success_frames'):
+            self.success_index = 0
+            self.animar_success_gif()
+
+        # 6. Redirección final (aumentamos a 3 segundos para que se vea el confeti)
+        self.after(3000, self.ir_a_lista_usuarios)
 
     def cerrar_confirmacion(self):
         if hasattr(self, 'confirm_card'):
@@ -394,19 +421,82 @@ class RegistroApp(ctk.CTk):
     def capturar_foto(self):
         self.camera_running = False 
         
+        # 1. Cargar frames del GIF del círculo azul con palomita
+        self.check_frames = []
+        try:
+            # Asegúrate de que el nombre del archivo coincida (ej: "check_blue.gif")
+            gif_check = Image.open("check_blue_gif.gif") 
+            while True:
+                # Redimensionamos al tamaño de un icono (ej: 35x35)
+                frame = gif_check.copy().resize((45, 45), Image.Resampling.LANCZOS)
+                self.check_frames.append(ImageTk.PhotoImage(frame))
+                gif_check.seek(len(self.check_frames))
+        except EOFError:
+            pass
+
+        # 2. Reemplazar el icono de advertencia por el GIF
+        self.status_icon.configure(text="", image=self.check_frames[0])
         
-        
-        # ACTUALIZAR EL TEXTO (Se mantiene negro pero cambia el mensaje)
+        # 3. Actualizar el texto
         self.status_text.configure(
-            text="ROSTRO CAPTURADO",
-            text_color="black"
+            text="Rostro capturado",
+            text_color="#64748B",
+            font=("Inter", 20, "bold")
         )
         
-        
-        # (Opcional)  ocultar los botones de capturar si ya terminó
+        # Ocultar botones de la cámara
         self.btn_box.place_forget() 
+
+        # 4. Iniciar la animación del pequeño check
+        self.check_index = 0
+        self.animar_check_gif()
+
+    def animar_check_gif(self):
+        if not self.camera_running and hasattr(self, 'check_frames'):
+            # --- AJUSTE MANUAL DE PARADA ---
+            # Si tu GIF tiene 20 frames, prueba con 15 o 18.
+            # Cambia el "- 1" por un número mayor para frenar más antes.
+            frame_de_parada = len(self.check_frames) - 10 
+
+            if self.check_index < frame_de_parada:
+                frame = self.check_frames[self.check_index]
+                self.status_icon.configure(image=frame)
+                
+                self.check_index += 1
+                self.after(80, self.animar_check_gif)
+            else:
+                # Se queda clavado en el frame de la palomita
+                frame_final = self.check_frames[frame_de_parada]
+                self.status_icon.configure(image=frame_final)
         
         #self.mostrar_notificacion("Captura exitosa", "#26AE00")
+    def animar_success_gif(self):
+        # Solo animamos si tenemos los frames y el widget existe
+        if hasattr(self, 'success_frames') and self.status_icon.winfo_exists():
+            
+            # --- AJUSTE MANUAL DE PARADA (REVISIÓN 1 Y 2) ---
+            # Calibramos la parada: 'len - 5' suele ser el punto máximo del confeti 
+            # antes de que empiece a caer o el GIF se resetee.
+            frame_de_parada = len(self.success_frames) - 1
+
+            # Aseguramos que el índice no sea negativo
+            if frame_de_parada < 0: frame_de_parada = 0
+
+            # Lógica de animación calibrada
+            if self.success_index < frame_de_parada:
+                frame = self.success_frames[self.success_index]
+                self.status_icon.configure(image=frame)
+                
+                self.success_index += 1
+                # Velocidad de la celebración (un poco más rápido, 60ms)
+                self.after(60, self.animar_success_gif)
+            else:
+                # SE DETIENE EL BUCLE: Se clava en el frame de parada (confeti visible)
+                frame_final = self.success_frames[frame_de_parada]
+                self.status_icon.configure(image=frame_final)
+                
+                # Opcional: Liberar memoria de los frames
+                del self.success_frames
 
     def cancelar_app(self):
         self.mostrar_notificacion("Cerrando registro", "#FF0B0B")
