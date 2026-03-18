@@ -177,3 +177,61 @@ def obtener_registros():
         if 'conexion' in locals() and conexion:
             conexion.close()
     return registros_lista
+
+
+
+def obtener_encodings():
+    try:
+        conexion = sqlite3.connect(DB_NOMBRE)
+        cursor = conexion.cursor()
+
+        cursor.execute("SELECT encoding FROM datos_biometricos")
+        datos = cursor.fetchall()
+
+        return datos
+
+    except sqlite3.Error as error:
+        print(f"Error al obtener encodings: {error}")
+        return []
+
+    finally:
+        if 'conexion' in locals() and conexion:
+            conexion.close()
+
+
+def guardar_biometria(id_usuario, encoding_bytes):
+    try:
+        conexion = sqlite3.connect(DB_NOMBRE)
+        cursor = conexion.cursor()
+
+        cursor.execute("""
+            INSERT INTO datos_biometricos (id_usuario, encoding, fecha_actualizacion)
+            VALUES (?, ?, datetime('now'))
+        """, (id_usuario, encoding_bytes))
+
+        conexion.commit()
+        return True
+
+    except sqlite3.Error as error:
+        print(f"Error al guardar biometría: {error}")
+        return False
+
+    finally:
+        if 'conexion' in locals() and conexion:
+            conexion.close()
+
+
+def usuario_tiene_biometria(id_usuario):
+    try:
+        conexion = sqlite3.connect(DB_NOMBRE)
+        cursor = conexion.cursor()
+
+        cursor.execute("""
+            SELECT id_usuario FROM datos_biometricos WHERE id_usuario = ?
+        """, (id_usuario,))
+
+        return cursor.fetchone() is not None
+
+    finally:
+        if 'conexion' in locals() and conexion:
+            conexion.close()

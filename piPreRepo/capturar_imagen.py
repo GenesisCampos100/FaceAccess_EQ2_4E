@@ -4,6 +4,13 @@ import sqlite3                      #base de datos
 import numpy as np                  #manejo de vectores
 import time                         #contador
 
+
+from gestor_db import (
+    obtener_encodings,
+    guardar_biometria,
+)
+
+
 '''
 >>  Flujo del sistema
 
@@ -17,32 +24,26 @@ Comparar encodings
 ¿Existe duplicado?
 
 SI → cancelar registro
-NO → guardar encoding
+NO → guardar encoding1
+
 '''
 
 # Conexión a la base de datos
 
-conexion = sqlite3.connect("control_acceso.db")  #Solo hace conexión
-cursor = conexion.cursor() #Permite ejecutar comandos
-
-
 #Ingresa usuario (Aquí se puede agregar el formulario o modificar el 
 # código para que se ejecute después de ingresar el usuario en el registro)
 
-idusuario = input("Ingrese el ID del usuario: ")
+matricula = input("Ingrese matrícula del usuario: ")
 
 
 #Se obtienen los encodings de la base de datos para compararlos con el nuevo encoding que se va a generar
-cursor.execute("SELECT encoding FROM datos_biometricos")
 
-datos = cursor.fetchall()
+datos = obtener_encodings()
 
 encodings_guardados = []
 
 for fila in datos:
-
     encoding = np.frombuffer(fila[0], dtype=np.float64)
-
     encodings_guardados.append(encoding)
 
 
@@ -128,11 +129,13 @@ while True:
         contador_activo = False
 
 
+    cv2.imshow("Registro biometrico", frame)
+
     if cv2.waitKey(1) == 27:
         cap.release()
         cv2.destroyAllWindows()
-        conexion.close()
         exit()
+
 
 
 #Genera el nuevo encoding a partir de la imagen capturada del usuario de quien se hace registro
@@ -140,6 +143,9 @@ encoding_nuevo = face_recognition.face_encodings(rgb, rostros)[0]
 
 
 #Verifica que no haya duplicados en la base de datos comparando el nuevo encoding con los encodings guardados
+duplicado = False
+
+
 duplicado = False
 
 for encoding in encodings_guardados:
@@ -160,32 +166,16 @@ if duplicado:
 
     print("Este rostro ya está registrado en el sistema")
 
-    cap.release()
-    cv2.destroyAllWindows()
-    conexion.close()
-    exit()
-
-
 else:
 
     encoding_bytes = encoding_nuevo.tobytes()
 
-
-    #Se inserta el encoding en la base de datos
-    cursor.execute(
-    """
-    INSERT INTO datos_biometricos (id_usuario, encoding, fecha_actualizacion)
-    VALUES (?, ?, datetime('now'))
-    """,
-    (idusuario, encoding_bytes)
-    )
-
-    conexion.commit()
-
-    print("Biometría registrada correctamente")
+    if guardar_biometria(matricula, encoding_bytes):
+        print("Biometría registrada correctamente")
+    else:
+        print("Error al guardar biometría")
 
 
 #Se cierran camara, ventanas y conexión a la base de datos
 cap.release()
 cv2.destroyAllWindows()
-conexion.close()
