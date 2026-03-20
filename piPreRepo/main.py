@@ -1,6 +1,11 @@
 import sys
 import os
 
+# --- INICIO DEL PARCHE PARA TKINTER (PYTHON 3.13) ---
+os.environ['TCL_LIBRARY'] = r'C:\Users\karol\AppData\Local\Programs\Python\Python313\tcl\tcl8.6'
+os.environ['TK_LIBRARY'] = r'C:\Users\karol\AppData\Local\Programs\Python\Python313\tcl\tk8.6'
+# --- FIN DEL PARCHE ---
+
 # Forzamos la ruta al .venv que está una carpeta arriba
 ruta_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ruta_librerias = os.path.join(ruta_base, ".venv", "Lib", "site-packages")
