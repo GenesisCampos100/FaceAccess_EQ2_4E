@@ -1,711 +1,769 @@
-"""
-ReconocimientoFacial.py — Sistema de acceso facial con UI guiada.
-
-Componentes UI:
-  · Óvalo guía con colores (gris/amarillo/verde/rojo)
-  · Validación de distancia (acércate / aléjate / perfecto)
-  · Liveness detection por parpadeo (evita fotos impresas)
-  · Barra de progreso de verificación
-
-Flujo completo:
-  1. Óvalo gris  → esperando rostro
-  2. Óvalo amarillo → rostro detectado, validar distancia
-  3. "Acércate" / "Aléjate" si el tamaño no es correcto
-  4. Óvalo verde → distancia correcta, detectar parpadeo
-  5. Barra de progreso → verificando identidad (3 frames)
-  6. Resultado: BIENVENIDO / ACCESO DENEGADO
-  7. Pausa 3 segundos → volver al paso 1
-
-Controles:
-  ESC → salir
-  M   → acceso manual
-  L   → login admin
-  R   → recargar encodings
-"""
-
-import cv2
-import os
-import json
-import threading
-import numpy as np
-import face_recognition
-import imutils
-from collections import Counter, deque
+import customtkinter as ctk
 from datetime import datetime
-from entrenadoRF import cargar_encodings_bd
-from db_manager import (
-    obtener_usuario_por_id,
-    obtener_usuario_por_matricula,
-    tiene_entrada_abierta,
-    registrar_entrada,
-    registrar_salida,
-    registrar_intento_fallido,
-    guardar_evidencia,
-    login,
-    puede_registrar,
-    nombre_rol,
-)
+import os
+import threading
+
+try:
+    from PIL import Image, ImageDraw
+    PIL_DISPONIBLE = True
+except ImportError:
+    PIL_DISPONIBLE = False
+
+try:
+    import cv2
+    CV2_DISPONIBLE = True
+except ImportError:
+    CV2_DISPONIBLE = False
+
+# ─── Paleta ───────────────────────────────────────────────────────────────────
+C_BG        = "#0F1923"
+C_FRAME     = "#1A2B3C"
+C_FOOTER    = "#111E2A"
+C_BORDE     = "#243447"
+C_OK        = "#00D4AA"
+C_WARN      = "#F5A623"
+C_ERROR     = "#E24B4A"
+C_TXT       = "#E0EAF4"
+C_TXT2      = "#6B8CAE"
+C_TXT3      = "#4A6280"
 
 # ─── Configuración ────────────────────────────────────────────────────────────
-EVIDENCIAS_DIR   = "evidencias"
-TOLERANCIA       = 0.50      # distancia máxima para reconocer
-PAUSA_SEG        = 3         # segundos entre reconocimientos
-FRAMES_CONFIRM   = 4         # frames para confirmar identidad
-ESCALA_DETEC     = 0.25      # reducir frame para detección
-
-# Tamaño del rostro aceptable (porcentaje del alto del frame)
-ROSTRO_MIN_RATIO = 0.28      # muy lejos si es menor
-ROSTRO_MAX_RATIO = 0.75      # muy cerca si es mayor
-
-# Liveness — parpadeo
-UMBRAL_OJO_ABIERTO  = 0.25   # EAR mínimo para considerar ojo abierto
-UMBRAL_OJO_CERRADO  = 0.20   # EAR máximo para considerar ojo cerrado
-PARPADEOS_REQUERIDOS = 1     # parpadeos necesarios para confirmar vida
-
-# Óvalo guía
-OVALO_COLOR_ESPERA   = (120, 120, 120)   # gris
-OVALO_COLOR_DETECTADO = (0, 200, 255)   # amarillo
-OVALO_COLOR_LISTO    = (0, 255, 0)      # verde
-OVALO_COLOR_DENEGADO = (0, 0, 255)      # rojo
-OVALO_COLOR_EXITO    = (0, 255, 150)    # verde claro
+FALLOS_PARA_NUMPAD = 2   # intentos fallidos antes de mostrar numpad
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  LIVENESS DETECTION — EAR (Eye Aspect Ratio)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def calcular_ear(ojo: np.ndarray) -> float:
-    """
-    Calcula el Eye Aspect Ratio (EAR) de un ojo.
-    EAR bajo = ojo cerrado, EAR alto = ojo abierto.
-    Fórmula: (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
-    """
-    A = np.linalg.norm(ojo[1] - ojo[5])
-    B = np.linalg.norm(ojo[2] - ojo[4])
-    C = np.linalg.norm(ojo[0] - ojo[3])
-    return (A + B) / (2.0 * C) if C > 0 else 0.0
-
-
-def obtener_ear_frame(gray_frame, ubicacion: tuple) -> float | None:
-    """
-    Obtiene el EAR promedio de ambos ojos para una ubicación de rostro.
-    Retorna None si no puede obtener los landmarks.
-    """
-    top, right, bottom, left = ubicacion
-    try:
-        landmarks = face_recognition.face_landmarks(
-            gray_frame, [(top, right, bottom, left)]
-        )
-        if not landmarks:
-            return None
-
-        lm          = landmarks[0]
-        ojo_izq     = np.array(lm.get("left_eye", []))
-        ojo_der     = np.array(lm.get("right_eye", []))
-
-        if len(ojo_izq) < 6 or len(ojo_der) < 6:
-            return None
-
-        ear_izq = calcular_ear(ojo_izq)
-        ear_der = calcular_ear(ojo_der)
-        return (ear_izq + ear_der) / 2.0
-    except Exception:
-        return None
-
-
-class DetectorParpadeo:
-    """Detecta parpadeos reales para liveness detection."""
-
-    def __init__(self, parpadeos_requeridos: int = 1):
-        self.parpadeos_requeridos = parpadeos_requeridos
-        self.contador_parpadeos  = 0
-        self.ojos_cerrados       = False
-        self.historial_ear       = deque(maxlen=10)
-
-    def reset(self):
-        self.contador_parpadeos = 0
-        self.ojos_cerrados      = False
-        self.historial_ear.clear()
-
-    def actualizar(self, ear: float) -> bool:
-        """
-        Actualiza con nuevo valor EAR.
-        Retorna True si ya se detectaron los parpadeos requeridos.
-        """
-        self.historial_ear.append(ear)
-
-        if ear < UMBRAL_OJO_CERRADO:
-            self.ojos_cerrados = True
-        elif ear > UMBRAL_OJO_ABIERTO and self.ojos_cerrados:
-            # Transición cerrado → abierto = 1 parpadeo
-            self.contador_parpadeos += 1
-            self.ojos_cerrados = False
-
-        return self.contador_parpadeos >= self.parpadeos_requeridos
-
-    @property
-    def progreso(self) -> float:
-        """Retorna progreso de 0.0 a 1.0."""
-        return min(self.contador_parpadeos / self.parpadeos_requeridos, 1.0)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ESTADO DEL SISTEMA
-# ══════════════════════════════════════════════════════════════════════════════
-
-class EstadoSistema:
-    ESPERANDO   = "esperando"
-    DETECTADO   = "detectado"
-    LIVENESS    = "liveness"
-    VERIFICANDO = "verificando"
-    RESULTADO   = "resultado"
-    PAUSA       = "pausa"
+class FaceAccessKiosk(ctk.CTk):
 
     def __init__(self):
-        self.lock              = threading.Lock()
-        self.fase              = self.ESPERANDO
-        self.corriendo         = True
+        super().__init__()
+        ctk.set_appearance_mode("dark")
 
-        # Threading
-        self.frame_pendiente   = None
-        self.hay_frame_nuevo   = False
-        self.resultado_hilo    = None
-        self.hay_resultado     = False
+        self.title("FaceAccess")
+        self.geometry("480x800")
+        self.resizable(False, False)
+        self.configure(fg_color=C_BG)
 
-        # Reconocimiento
-        self.buffer_ids        = []
-        self.ultimo_resultado  = None
+        # ── Estado del sistema ─────────────────────────────────────────────
+        self.estado          = "escaneando"
+        self.fallos_seguidos = 0
+        self.contador_in     = 0
+        self.contador_out    = 0
+        self.camara_activa   = False
+        self.cap             = None
+        self._pulso_job      = None
+        self._pulso_fase     = 0
+        self._prog_job       = None
+        self._prog_val       = 0.0
+        self._numpad_val     = ""
+        self._numpad_visible = False
 
-        # Liveness
-        self.detector_parpadeo = DetectorParpadeo(PARPADEOS_REQUERIDOS)
+        # ── Construcción ───────────────────────────────────────────────────
+        self._ui_header()
+        self._ui_saludo()
+        self._ui_camara()
+        self._ui_usuario()
 
-        # Pausa
-        self.tiempo_pausa      = None
-        self.mensaje_resultado = None
+        # ── Inicio ─────────────────────────────────────────────────────────
+        self.actualizar_reloj()
+        self._pulso_loop()
+        self.after(400, self._iniciar_camara)
+        self.protocol("WM_DELETE_WINDOW", self._cerrar)
+        self._set_estado("escaneando")
 
-        # UI
-        self.ultimo_coords     = None   # coords del rostro para dibujar óvalo
-        self.progreso_barra    = 0.0    # 0.0 a 1.0
+    # ══════════════════════════════════════════════════════════════════════
+    #  CONSTRUCCIÓN UI
+    # ══════════════════════════════════════════════════════════════════════
 
-    def poner_frame(self, frame):
-        with self.lock:
-            self.frame_pendiente = frame.copy()
-            self.hay_frame_nuevo = True
+    def _ui_header(self):
+        f = ctk.CTkFrame(self, fg_color=C_FRAME,
+                          corner_radius=0, height=58)
+        f.pack(fill="x")
+        f.pack_propagate(False)
 
-    def tomar_frame(self):
-        with self.lock:
-            if not self.hay_frame_nuevo:
-                return None
-            self.hay_frame_nuevo = False
-            return self.frame_pendiente
+        # Logo
+        fl = ctk.CTkFrame(f, fg_color="transparent")
+        fl.pack(side="left", padx=14, pady=10)
 
-    def poner_resultado_hilo(self, res):
-        with self.lock:
-            self.resultado_hilo = res
-            self.hay_resultado  = True
+        canvas = ctk.CTkCanvas(fl, width=32, height=32,
+                                bg=C_FRAME, highlightthickness=0)
+        canvas.pack(side="left", padx=(0, 8))
+        canvas.create_oval(2, 2, 30, 30, fill=C_OK, outline="")
+        canvas.create_text(16, 16, text="FA",
+                            fill=C_BG, font=("Helvetica", 10, "bold"))
 
-    def tomar_resultado_hilo(self):
-        with self.lock:
-            if not self.hay_resultado:
-                return None
-            self.hay_resultado = False
-            return self.resultado_hilo
+        fn = ctk.CTkFrame(fl, fg_color="transparent")
+        fn.pack(side="left")
+        ctk.CTkLabel(fn, text="CBTis 163",
+                     font=("Helvetica", 13, "bold"),
+                     text_color=C_TXT).pack(anchor="w")
+        ctk.CTkLabel(fn, text="Control de Acceso",
+                     font=("Helvetica", 10),
+                     text_color=C_TXT2).pack(anchor="w")
 
-    def iniciar_pausa(self, mensaje: dict):
-        self.fase             = self.PAUSA
-        self.tiempo_pausa     = datetime.now()
-        self.mensaje_resultado = mensaje
-        self.buffer_ids       = []
-        self.detector_parpadeo.reset()
-        self.progreso_barra   = 0.0
+        # Reloj
+        fr = ctk.CTkFrame(f, fg_color="transparent")
+        fr.pack(side="right", padx=14)
+        self.lbl_hora = ctk.CTkLabel(fr, text="",
+                                      font=("Helvetica", 18, "bold"),
+                                      text_color=C_TXT)
+        self.lbl_hora.pack(anchor="e")
+        self.lbl_fecha = ctk.CTkLabel(fr, text="",
+                                       font=("Helvetica", 10),
+                                       text_color=C_TXT2)
+        self.lbl_fecha.pack(anchor="e")
 
-    def verificar_pausa(self) -> bool:
-        """Retorna True si la pausa terminó."""
-        if self.fase != self.PAUSA:
-            return True
-        seg = (datetime.now() - self.tiempo_pausa).total_seconds()
-        if seg >= PAUSA_SEG:
-            self.fase             = self.ESPERANDO
-            self.mensaje_resultado = None
-            return True
-        return False
+    def _ui_saludo(self):
+        f = ctk.CTkFrame(self, fg_color=C_FOOTER,
+                          corner_radius=0, height=34)
+        f.pack(fill="x")
+        f.pack_propagate(False)
 
+        # Saludo
+        self.lbl_saludo = ctk.CTkLabel(f, text="",
+                                        font=("Helvetica", 11),
+                                        text_color=C_TXT2)
+        self.lbl_saludo.pack(side="left", padx=14)
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  HELPERS VISUALES
-# ══════════════════════════════════════════════════════════════════════════════
+        # Contadores
+        fc = ctk.CTkFrame(f, fg_color="transparent")
+        fc.pack(side="right", padx=14)
 
-def guardar_foto_evidencia(frame, prefijo: str) -> str:
-    if not os.path.exists(EVIDENCIAS_DIR):
-        os.makedirs(EVIDENCIAS_DIR)
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    ruta = os.path.join(EVIDENCIAS_DIR, f"{prefijo}_{ts}.jpg")
-    cv2.imwrite(ruta, frame)
-    return ruta
+        ctk.CTkLabel(fc, text="●", font=("Helvetica", 8),
+                     text_color=C_OK).pack(side="left", padx=(0, 3))
+        self.lbl_cnt_in = ctk.CTkLabel(fc, text="0 entradas",
+                                        font=("Helvetica", 10),
+                                        text_color=C_OK)
+        self.lbl_cnt_in.pack(side="left", padx=(0, 10))
 
+        ctk.CTkLabel(fc, text="●", font=("Helvetica", 8),
+                     text_color=C_TXT2).pack(side="left", padx=(0, 3))
+        self.lbl_cnt_out = ctk.CTkLabel(fc, text="0 salidas",
+                                         font=("Helvetica", 10),
+                                         text_color=C_TXT2)
+        self.lbl_cnt_out.pack(side="left")
 
-def dibujar_ovalo(frame, color: tuple, grosor: int = 3):
-    """Dibuja el óvalo guía centrado en el frame."""
-    h, w    = frame.shape[:2]
-    cx, cy  = w // 2, h // 2
-    rx, ry  = int(w * 0.22), int(h * 0.42)
-    cv2.ellipse(frame, (cx, cy), (rx, ry), 0, 0, 360, color, grosor)
+    def _ui_camara(self):
+        self.frame_cam = ctk.CTkFrame(self, fg_color="#080F16",
+                                       corner_radius=0, height=460)
+        self.frame_cam.pack(fill="x")
+        self.frame_cam.pack_propagate(False)
 
-
-def dibujar_instruccion(frame, texto: str, color: tuple = (255, 255, 255)):
-    """Texto de instrucción centrado en la parte superior."""
-    h, w = frame.shape[:2]
-    tam  = cv2.getTextSize(texto, cv2.FONT_HERSHEY_DUPLEX, 0.8, 2)[0]
-    x    = (w - tam[0]) // 2
-    # Fondo
-    cv2.rectangle(frame, (x - 10, 12), (x + tam[0] + 10, 45), (0, 0, 0), -1)
-    cv2.putText(frame, texto, (x, 38),
-                cv2.FONT_HERSHEY_DUPLEX, 0.8, color, 2, cv2.LINE_AA)
-
-
-def dibujar_barra_progreso(frame, progreso: float, color: tuple):
-    """Barra de progreso en la parte inferior del frame."""
-    h, w    = frame.shape[:2]
-    margen  = 40
-    alto    = 12
-    y       = h - 25
-    # Fondo de la barra
-    cv2.rectangle(frame, (margen, y), (w - margen, y + alto),
-                  (50, 50, 50), -1)
-    # Progreso
-    ancho_lleno = int((w - 2 * margen) * progreso)
-    if ancho_lleno > 0:
-        cv2.rectangle(frame, (margen, y),
-                      (margen + ancho_lleno, y + alto), color, -1)
-    # Borde
-    cv2.rectangle(frame, (margen, y), (w - margen, y + alto),
-                  (180, 180, 180), 1)
-
-
-def dibujar_resultado(frame, mensaje: dict):
-    """Banner de resultado al reconocer."""
-    h, w = frame.shape[:2]
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, h - 115), (w, h), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
-    color = mensaje["color"]
-    cv2.putText(frame, mensaje["linea3"], (15, h - 82),
-                cv2.FONT_HERSHEY_DUPLEX, 1.0, color, 2, cv2.LINE_AA)
-    cv2.putText(frame, mensaje["linea1"], (15, h - 47),
-                cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, mensaje["linea2"], (15, h - 18),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
-
-
-def validar_distancia(h_frame: int, alto_rostro: int) -> str:
-    """
-    Valida si el rostro está a la distancia correcta.
-    Retorna: 'ok', 'acercate', 'alejate'
-    """
-    ratio = alto_rostro / h_frame
-    if ratio < ROSTRO_MIN_RATIO:
-        return "acercate"
-    elif ratio > ROSTRO_MAX_RATIO:
-        return "alejate"
-    return "ok"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  HILO DE RECONOCIMIENTO
-# ══════════════════════════════════════════════════════════════════════════════
-
-def hilo_reconocimiento(estado: EstadoSistema,
-                         encodings_ref: list, ids_ref: list):
-    while estado.corriendo:
-        frame = estado.tomar_frame()
-        if frame is None:
-            continue
-
-        small = cv2.resize(frame, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
-        rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-
-        ubicaciones = face_recognition.face_locations(rgb, model="hog")
-
-        if not ubicaciones:
-            estado.poner_resultado_hilo({"tipo": "sin_rostro"})
-            continue
-
-        # Escalar coordenadas al frame original
-        escala = int(1 / ESCALA_DETEC)
-        top, right, bottom, left = ubicaciones[0]
-        coords_orig = (top * escala, right * escala,
-                       bottom * escala, left * escala)
-
-        # Encoding del rostro
-        encodings = face_recognition.face_encodings(rgb, [ubicaciones[0]])
-        if not encodings:
-            estado.poner_resultado_hilo({"tipo": "sin_rostro"})
-            continue
-
-        enc = encodings[0]
-
-        # Comparar contra BD
-        if encodings_ref:
-            distancias = face_recognition.face_distance(encodings_ref, enc)
-            idx        = int(np.argmin(distancias))
-            distancia  = float(distancias[idx])
-            id_usuario = ids_ref[idx] if distancia <= TOLERANCIA else None
-        else:
-            id_usuario, distancia = None, 1.0
-
-        estado.poner_resultado_hilo({
-            "tipo"      : "rostro",
-            "id_usuario": id_usuario,
-            "distancia" : distancia,
-            "coords"    : coords_orig,
-            "frame"     : frame.copy(),
-        })
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  REGISTRAR ACCESO EN BD
-# ══════════════════════════════════════════════════════════════════════════════
-
-def registrar_acceso(resultado: dict, estado: EstadoSistema):
-    id_usuario = resultado["id_usuario"]
-    frame_cap  = resultado["frame"]
-    ahora      = datetime.now()
-    dt_str     = ahora.strftime("%d/%m/%Y  %H:%M:%S")
-
-    if id_usuario is not None:
-        usuario = obtener_usuario_por_id(id_usuario)
-        nombre  = (f"{usuario['nombre']} {usuario['apellido_p']}"
-                   if usuario else f"ID {id_usuario}")
-
-        if tiene_entrada_abierta(id_usuario):
-            registrar_salida(id_usuario)
-            guardar_foto_evidencia(frame_cap, f"salida_{id_usuario}")
-            print(f"[BD] SALIDA  — {nombre} | {dt_str}")
-            mensaje = {"linea1": nombre, "linea2": dt_str,
-                       "linea3": "HASTA LUEGO",
-                       "color": (0, 165, 255),
-                       "ovalo_color": OVALO_COLOR_EXITO}
-        else:
-            id_acceso = registrar_entrada(id_usuario, "FACIAL")
-            foto      = guardar_foto_evidencia(frame_cap, f"entrada_{id_usuario}")
-            guardar_evidencia(id_acceso, foto, "Entrada facial")
-            print(f"[BD] ENTRADA — {nombre} | {dt_str}")
-            mensaje = {"linea1": nombre, "linea2": dt_str,
-                       "linea3": "BIENVENIDO/A",
-                       "color": (0, 255, 0),
-                       "ovalo_color": OVALO_COLOR_EXITO}
-    else:
-        guardar_foto_evidencia(frame_cap, "desconocido")
-        registrar_intento_fallido("Rostro no reconocido")
-        print(f"[BD] DENEGADO | dist: {resultado['distancia']:.3f} | {dt_str}")
-        mensaje = {"linea1": "Rostro no registrado", "linea2": dt_str,
-                   "linea3": "ACCESO DENEGADO",
-                   "color": (0, 0, 255),
-                   "ovalo_color": OVALO_COLOR_DENEGADO}
-
-    estado.iniciar_pausa(mensaje)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ACCESO MANUAL Y LOGIN ADMIN
-# ══════════════════════════════════════════════════════════════════════════════
-
-def procesar_acceso_manual(ultimo_frame):
-    print("\n" + "="*40)
-    print("  ACCESO MANUAL")
-    print("="*40)
-    matricula = input("Matricula: ").strip()
-    usuario   = obtener_usuario_por_matricula(matricula)
-    dt_str    = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
-
-    if not usuario:
-        guardar_foto_evidencia(ultimo_frame, "manual_fallido")
-        registrar_intento_fallido(
-            f"Acceso manual — matricula no encontrada: {matricula}",
-            matricula=matricula
+        # Badge de estado
+        self.lbl_badge = ctk.CTkLabel(
+            self.frame_cam, text="● Escaneando",
+            font=("Helvetica", 10, "bold"),
+            text_color=C_OK, fg_color=C_FRAME,
+            corner_radius=10, padx=10, pady=3
         )
-        print(f"[BD] Matricula '{matricula}' no encontrada.")
-        return
+        self.lbl_badge.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
 
-    nombre    = f"{usuario['nombre']} {usuario['apellido_p']}"
-    id_acceso = registrar_entrada(usuario["id_usuario"], "MANUAL")
-    foto      = guardar_foto_evidencia(ultimo_frame, f"manual_{usuario['id_usuario']}")
-    guardar_evidencia(id_acceso, foto, "Entrada manual")
-    print(f"[BD] ENTRADA MANUAL — {nombre} | {dt_str}")
-
-
-def procesar_login_admin(encodings_bd, ids_bd, matricula,
-                          contrasenia, resultado) -> dict | None:
-    usuario_bd = login(matricula, contrasenia)
-    if not usuario_bd:
-        registrar_intento_fallido("Credenciales incorrectas", matricula=matricula)
-        print("[LOGIN] Credenciales incorrectas.")
-        return None
-
-    id_u = resultado.get("id_usuario") if resultado else None
-    if id_u is None or resultado.get("distancia", 1.0) > TOLERANCIA:
-        registrar_intento_fallido("Rostro no reconocido en login",
-                                   matricula=matricula,
-                                   id_usuario=usuario_bd["id_usuario"])
-        print("[LOGIN] Rostro no reconocido.")
-        return None
-
-    if id_u != usuario_bd["id_usuario"]:
-        registrar_intento_fallido("Rostro no coincide",
-                                   matricula=matricula,
-                                   id_usuario=usuario_bd["id_usuario"])
-        print("[LOGIN] Rostro no coincide.")
-        return None
-
-    if not puede_registrar(usuario_bd["id_rol"]):
-        registrar_intento_fallido(
-            f"Sin permisos — {nombre_rol(usuario_bd['id_rol'])}",
-            matricula=matricula, id_usuario=usuario_bd["id_usuario"]
+        # Video
+        self.lbl_video = ctk.CTkLabel(
+            self.frame_cam, text="Iniciando cámara...",
+            font=("Helvetica", 13), text_color=C_TXT2
         )
-        print("[LOGIN] Sin permisos.")
-        return None
+        self.lbl_video.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-    print(f"[LOGIN] Concedido — {usuario_bd['nombre']}")
-    return dict(usuario_bd)
+        # Instrucción
+        self.lbl_inst = ctk.CTkLabel(
+            self.frame_cam,
+            text="Coloca tu rostro en el óvalo",
+            font=("Helvetica", 12, "bold"),
+            text_color=C_OK, fg_color="#0D1E2D",
+            corner_radius=16, padx=14, pady=5
+        )
+        self.lbl_inst.place(relx=0.5, rely=0.87, anchor="center")
 
+        # Barra de progreso
+        self.progress = ctk.CTkProgressBar(
+            self.frame_cam, width=380, height=4,
+            corner_radius=2,
+            fg_color=C_FRAME, progress_color=C_OK
+        )
+        self.progress.place(relx=0.5, rely=0.96, anchor="center")
+        self.progress.set(0)
 
-def abrir_interfaz_registro(usuario_sesion: dict):
-    print("\n" + "="*40)
-    print(f"  SESION : {usuario_sesion['nombre']} {usuario_sesion['apellido_p']}")
-    print(f"  ROL    : {usuario_sesion['nombre_rol']}")
-    print("="*40)
-    # from interfaz_registro import abrir_ventana
-    # abrir_ventana(usuario_sesion)
+        # Label de progreso
+        self.lbl_prog = ctk.CTkLabel(
+            self.frame_cam, text="",
+            font=("Helvetica", 10), text_color=C_TXT2
+        )
+        self.lbl_prog.place(relx=0.5, rely=0.92, anchor="center")
+
+        # ── Numpad overlay ─────────────────────────────────────────────────
+        self.frame_numpad = ctk.CTkFrame(
+            self.frame_cam, fg_color="#080F16",
+            corner_radius=0
+        )
+        # No se empaqueta aún — se activa en _mostrar_numpad()
+
+        ctk.CTkLabel(self.frame_numpad,
+                     text="Acceso manual",
+                     font=("Helvetica", 14, "bold"),
+                     text_color=C_TXT).pack(pady=(24, 2))
+        ctk.CTkLabel(self.frame_numpad,
+                     text="El reconocimiento facial no fue exitoso.\nIngresa tu matrícula.",
+                     font=("Helvetica", 11), text_color=C_TXT2,
+                     justify="center").pack(pady=(0, 12))
+
+        # Display del numpad
+        self.lbl_numpad_display = ctk.CTkLabel(
+            self.frame_numpad, text="",
+            font=("Helvetica", 22, "bold"),
+            text_color=C_TXT,
+            fg_color=C_FRAME, corner_radius=8,
+            width=240, height=44
+        )
+        self.lbl_numpad_display.pack(pady=(0, 14))
+
+        # Grid de botones
+        frame_grid = ctk.CTkFrame(self.frame_numpad, fg_color="transparent")
+        frame_grid.pack()
+
+        teclas = [
+            ("1", 0, 0), ("2", 0, 1), ("3", 0, 2),
+            ("4", 1, 0), ("5", 1, 1), ("6", 1, 2),
+            ("7", 2, 0), ("8", 2, 1), ("9", 2, 2),
+            ("⌫", 3, 0), ("0", 3, 1), ("OK", 3, 2),
+        ]
+        for (txt, row, col) in teclas:
+            if txt == "OK":
+                btn = ctk.CTkButton(
+                    frame_grid, text=txt,
+                    width=72, height=52,
+                    font=("Helvetica", 14, "bold"),
+                    fg_color=C_OK, text_color=C_BG,
+                    hover_color="#00A88A",
+                    corner_radius=8,
+                    command=self._numpad_ok
+                )
+            elif txt == "⌫":
+                btn = ctk.CTkButton(
+                    frame_grid, text=txt,
+                    width=72, height=52,
+                    font=("Helvetica", 16),
+                    fg_color=C_FRAME, text_color=C_ERROR,
+                    hover_color=C_BORDE,
+                    border_width=1, border_color=C_BORDE,
+                    corner_radius=8,
+                    command=self._numpad_del
+                )
+            else:
+                btn = ctk.CTkButton(
+                    frame_grid, text=txt,
+                    width=72, height=52,
+                    font=("Helvetica", 16, "bold"),
+                    fg_color=C_FRAME, text_color=C_TXT,
+                    hover_color=C_BORDE,
+                    border_width=1, border_color=C_BORDE,
+                    corner_radius=8,
+                    command=lambda t=txt: self._numpad_press(t)
+                )
+            btn.grid(row=row, column=col, padx=5, pady=5)
+
+        # Cancelar
+        ctk.CTkButton(
+            self.frame_numpad,
+            text="Cancelar",
+            font=("Helvetica", 11),
+            fg_color="transparent", text_color=C_TXT2,
+            hover_color=C_FRAME,
+            command=self._ocultar_numpad
+        ).pack(pady=(8, 0))
+
+    def _ui_usuario(self):
+        f = ctk.CTkFrame(self, fg_color=C_FRAME,
+                          corner_radius=0, height=130)
+        f.pack(fill="x", side="bottom")
+        f.pack_propagate(False)
+
+        # Separador superior
+        ctk.CTkFrame(f, fg_color=C_BORDE,
+                     height=1, corner_radius=0).pack(fill="x")
+
+        contenido = ctk.CTkFrame(f, fg_color="transparent")
+        contenido.pack(fill="both", expand=True, padx=14, pady=12)
+
+        # Avatar
+        self.lbl_avatar = ctk.CTkLabel(
+            contenido, text="", width=64, height=64
+        )
+        self.lbl_avatar.pack(side="left", padx=(0, 12))
+        self._avatar_default()
+
+        # Datos
+        fd = ctk.CTkFrame(contenido, fg_color="transparent")
+        fd.pack(side="left", fill="both", expand=True)
+
+        self.lbl_nombre = ctk.CTkLabel(
+            fd, text="Sin identificar",
+            font=("Helvetica", 15, "bold"),
+            text_color=C_TXT, anchor="w"
+        )
+        self.lbl_nombre.pack(anchor="w")
+
+        fp = ctk.CTkFrame(fd, fg_color="transparent")
+        fp.pack(anchor="w", pady=3)
+        self.pill_mat = ctk.CTkLabel(
+            fp, text="----",
+            font=("Helvetica", 10), text_color="#85B7EB",
+            fg_color="#0C2040", corner_radius=6, padx=7, pady=2
+        )
+        self.pill_mat.pack(side="left", padx=(0, 5))
+        self.pill_rol = ctk.CTkLabel(
+            fp, text="---",
+            font=("Helvetica", 10), text_color="#AFA9EC",
+            fg_color="#1C1640", corner_radius=6, padx=7, pady=2
+        )
+        self.pill_rol.pack(side="left")
+
+        self.lbl_sub = ctk.CTkLabel(
+            fd, text="Esperando reconocimiento...",
+            font=("Helvetica", 10), text_color=C_TXT2, anchor="w"
+        )
+        self.lbl_sub.pack(anchor="w")
+
+        # Ícono de resultado
+        self.lbl_mark = ctk.CTkLabel(
+            contenido, text="",
+            font=("Helvetica", 22), text_color=C_OK
+        )
+        self.lbl_mark.pack(side="right", padx=(0, 4))
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  AVATAR
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _avatar_default(self):
+        if not PIL_DISPONIBLE:
+            self.lbl_avatar.configure(text="👤", font=("Helvetica", 26),
+                                       image=None)
+            return
+        size = 64
+        img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse((0, 0, size-1, size-1), fill="#1A2B3C")
+        draw.ellipse((22, 8, 42, 28), fill="#4A6280")
+        draw.ellipse((12, 36, 52, 66), fill="#4A6280")
+        ci = ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+        self.lbl_avatar.configure(image=ci, text="")
+        self._av_img = ci
+
+    def _avatar_usuario(self, ruta=None, color_borde=None):
+        if not PIL_DISPONIBLE:
+            self.lbl_avatar.configure(text="😊", font=("Helvetica", 26),
+                                       image=None)
+            return
+        size        = 64
+        color_borde = color_borde or C_OK
+        if ruta and os.path.exists(ruta):
+            base = Image.open(ruta).convert("RGBA").resize(
+                (size, size), Image.Resampling.LANCZOS
+            )
+        else:
+            r = int(color_borde[1:3], 16)
+            g = int(color_borde[3:5], 16)
+            b = int(color_borde[5:7], 16)
+            base = Image.new("RGBA", (size, size), (r//2, g//2, b//2, 255))
+
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+        circ = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        circ.paste(base, (0, 0), mask)
+
+        r2 = int(color_borde[1:3], 16)
+        g2 = int(color_borde[3:5], 16)
+        b2 = int(color_borde[5:7], 16)
+        ImageDraw.Draw(circ).ellipse(
+            (1, 1, size-2, size-2), outline=(r2, g2, b2, 200), width=3
+        )
+        ci = ctk.CTkImage(light_image=circ, dark_image=circ, size=(size, size))
+        self.lbl_avatar.configure(image=ci, text="")
+        self._av_img = ci
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  ANIMACIÓN DE PULSO
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _pulso_loop(self):
+        """
+        Simula el pulso del óvalo cambiando el color del badge
+        cuando está en modo escaneando.
+        """
+        if self.estado == "escaneando":
+            self._pulso_fase = (self._pulso_fase + 1) % 6
+            if self._pulso_fase < 3:
+                self.lbl_badge.configure(text_color=C_OK)
+            else:
+                self.lbl_badge.configure(text_color=C_TXT3)
+        self._pulso_job = self.after(400, self._pulso_loop)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  PROGRESO ANIMADO
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _prog_animar(self, desde, hasta, ms, color, label=""):
+        if self._prog_job:
+            self.after_cancel(self._prog_job)
+        self.progress.configure(progress_color=color)
+        self.lbl_prog.configure(text=label)
+        pasos = 30
+        iv    = ms // pasos
+        inc   = (hasta - desde) / pasos
+        self._prog_val = desde
+
+        def paso():
+            self._prog_val = min(self._prog_val + inc, hasta)
+            self.progress.set(self._prog_val)
+            if self._prog_val < hasta:
+                self._prog_job = self.after(iv, paso)
+
+        self._prog_job = self.after(iv, paso)
+
+    def _prog_set(self, valor, color):
+        if self._prog_job:
+            self.after_cancel(self._prog_job)
+        self.progress.configure(progress_color=color)
+        self.progress.set(valor)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  NUMPAD
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _mostrar_numpad(self):
+        self._numpad_val = ""
+        self.lbl_numpad_display.configure(text="")
+        self.frame_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._numpad_visible = True
+        self._set_badge("● Acceso manual", C_WARN)
+        self._set_inst("Ingresa tu matrícula", C_WARN)
+
+    def _ocultar_numpad(self):
+        self.frame_numpad.place_forget()
+        self._numpad_visible = False
+        self.fallos_seguidos = 0
+        self._set_estado("escaneando")
+
+    def _numpad_press(self, tecla):
+        if len(self._numpad_val) < 12:
+            self._numpad_val += tecla
+            self.lbl_numpad_display.configure(text=self._numpad_val)
+
+    def _numpad_del(self):
+        self._numpad_val = self._numpad_val[:-1]
+        self.lbl_numpad_display.configure(
+            text=self._numpad_val if self._numpad_val else ""
+        )
+
+    def _numpad_ok(self):
+        if not self._numpad_val:
+            return
+        matricula = self._numpad_val
+        self._ocultar_numpad()
+
+        # ── Conectar con db_manager ──────────────────────────────────────
+        # from db_manager import obtener_usuario_por_matricula, registrar_entrada, guardar_evidencia
+        # usuario = obtener_usuario_por_matricula(matricula)
+        # if usuario:
+        #     id_acceso = registrar_entrada(usuario['id_usuario'], 'MANUAL')
+        #     self._set_estado('exito',
+        #         nombre=f"{usuario['nombre']} {usuario['apellido_p']}",
+        #         matricula=usuario['matricula'],
+        #         rol=usuario['nombre_rol'])
+        # else:
+        #     self._set_estado('denegado')
+        print(f"[MANUAL] Matrícula ingresada: {matricula}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  GESTIÓN DE ESTADOS — PUNTO DE INTEGRACIÓN PRINCIPAL
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _set_estado(self, estado, nombre="", matricula="",
+                    rol="", ruta_foto=None, ultimo_acceso=""):
+        """
+        Llama este método desde el hilo de reconocimiento.
+
+        Estados: 'escaneando' | 'liveness' | 'verificando' |
+                 'exito' | 'salida' | 'denegado'
+        """
+        self.estado = estado
+
+        if estado == "escaneando":
+            self._set_badge("● Escaneando", C_OK)
+            self._set_inst("Coloca tu rostro en el óvalo", C_OK)
+            self._prog_set(0, C_OK)
+            self.lbl_prog.configure(text="")
+            self._reset_usuario()
+
+        elif estado == "liveness":
+            self._set_badge("● Parpadea", C_WARN)
+            self._set_inst("Parpadea para confirmar", C_WARN)
+            self._prog_animar(0, 0.4, 1200, C_WARN, "Detección de vida")
+
+        elif estado == "verificando":
+            self._set_badge("● Verificando", C_OK)
+            self._set_inst("Verificando identidad...", C_OK)
+            self._prog_animar(0.4, 1.0, 600, C_OK, "Verificando identidad")
+
+        elif estado == "exito":
+            self.fallos_seguidos = 0
+            self.contador_in    += 1
+            self._actualizar_contadores()
+            self._set_badge("✓ Bienvenido/a", C_OK)
+            nom_corto = nombre.split()[0] if nombre else "Usuario"
+            saludo    = self._saludo_hora()
+            self._set_inst(f"{saludo}, {nom_corto}", C_OK)
+            self._prog_set(1.0, C_OK)
+            self.lbl_prog.configure(text="Acceso registrado")
+            self._set_usuario(nombre, matricula, rol, ruta_foto,
+                               ultimo_acceso or "Entrada registrada",
+                               C_OK, "✓")
+            self.after(3500, lambda: self._set_estado("escaneando"))
+
+        elif estado == "salida":
+            self.fallos_seguidos = 0
+            self.contador_out   += 1
+            self._actualizar_contadores()
+            self._set_badge("◀ Hasta luego", C_WARN)
+            nom_corto = nombre.split()[0] if nombre else "Usuario"
+            self._set_inst(f"Hasta luego, {nom_corto}", C_WARN)
+            self._prog_set(1.0, C_WARN)
+            self.lbl_prog.configure(text="Salida registrada")
+            self._set_usuario(nombre, matricula, rol, ruta_foto,
+                               ultimo_acceso or "Salida registrada",
+                               C_WARN, "◀")
+            self.after(3500, lambda: self._set_estado("escaneando"))
+
+        elif estado == "denegado":
+            self.fallos_seguidos += 1
+            self._set_badge("✗ Denegado", C_ERROR)
+            self._set_inst("Rostro no registrado", C_ERROR)
+            self._prog_set(1.0, C_ERROR)
+            self.lbl_prog.configure(text="Intento fallido")
+            self.lbl_nombre.configure(text="No registrado",
+                                       text_color=C_ERROR)
+            self.pill_mat.configure(text="----")
+            self.pill_rol.configure(text="---")
+            self.lbl_sub.configure(text="Intento fallido registrado",
+                                    text_color=C_ERROR)
+            self.lbl_mark.configure(text="✗", text_color=C_ERROR)
+            self._avatar_default()
+
+            # Mostrar numpad si supera el límite de fallos
+            if self.fallos_seguidos >= FALLOS_PARA_NUMPAD:
+                self.after(1500, self._mostrar_numpad)
+            else:
+                self.after(3000, lambda: self._set_estado("escaneando"))
+
+    def _set_badge(self, texto, color):
+        self.lbl_badge.configure(text=texto, text_color=color)
+
+    def _set_inst(self, texto, color):
+        self.lbl_inst.configure(text=texto, text_color=color)
+
+    def _reset_usuario(self):
+        self.lbl_nombre.configure(text="Sin identificar",
+                                   text_color=C_TXT)
+        self.pill_mat.configure(text="----")
+        self.pill_rol.configure(text="---")
+        self.lbl_sub.configure(text="Esperando reconocimiento...",
+                                text_color=C_TXT2)
+        self.lbl_mark.configure(text="")
+        self._avatar_default()
+
+    def _set_usuario(self, nombre, matricula, rol, ruta_foto,
+                      sub_texto, color, marca):
+        n = (nombre[:20] + "...") if len(nombre) > 20 else nombre
+        self.lbl_nombre.configure(text=n, text_color=C_TXT)
+        self.pill_mat.configure(text=matricula or "----")
+        self.pill_rol.configure(text=rol or "---")
+        self.lbl_sub.configure(text=sub_texto, text_color=color)
+        self.lbl_mark.configure(text=marca, text_color=color)
+        self._avatar_usuario(ruta_foto, color)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  HELPERS
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _saludo_hora(self) -> str:
+        h = datetime.now().hour
+        if h < 12:
+            return "Buenos días"
+        elif h < 19:
+            return "Buenas tardes"
+        return "Buenas noches"
+
+    def _actualizar_contadores(self):
+        self.lbl_cnt_in.configure(
+            text=f"{self.contador_in} entrada{'s' if self.contador_in != 1 else ''}"
+        )
+        self.lbl_cnt_out.configure(
+            text=f"{self.contador_out} salida{'s' if self.contador_out != 1 else ''}"
+        )
+
+    def actualizar_reloj(self):
+        now = datetime.now()
+        self.lbl_hora.configure(text=now.strftime("%H:%M:%S"))
+        self.lbl_fecha.configure(text=now.strftime("%d/%m/%Y"))
+
+        # Actualizar saludo
+        h = now.hour
+        if h < 12:
+            sal = "Buenos días ☀️"
+        elif h < 19:
+            sal = "Buenas tardes 🌤"
+        else:
+            sal = "Buenas noches 🌙"
+        self.lbl_saludo.configure(text=sal)
+
+        self.after(1000, self.actualizar_reloj)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  CÁMARA
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _iniciar_camara(self):
+        if not CV2_DISPONIBLE or not PIL_DISPONIBLE:
+            self.lbl_video.configure(text="Dependencias no instaladas")
+            return
+
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            self.lbl_video.configure(text="No se pudo abrir la cámara")
+            return
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.camara_activa = True
+        self._loop_camara()
+
+    def _loop_camara(self):
+        if not self.camara_activa or not self.cap:
+            return
+        if self._numpad_visible:
+            self.after(50, self._loop_camara)
+            return
+
+        ok, frame = self.cap.read()
+        if not ok:
+            self.after(50, self._loop_camara)
+            return
+
+        frame = cv2.flip(frame, 1)
+        tw    = max(self.frame_cam.winfo_width(), 2)
+        th    = max(self.frame_cam.winfo_height(), 2)
+        h, w  = frame.shape[:2]
+        esc   = max(tw / w, th / h)
+        nw, nh = max(int(w * esc), 1), max(int(h * esc), 1)
+        frame  = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
+        xi     = max((nw - tw) // 2, 0)
+        yi     = max((nh - th) // 2, 0)
+        frame  = frame[yi:yi+th, xi:xi+tw]
+        frame  = self._dibujar_ovalo(frame)
+
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img   = Image.fromarray(rgb)
+        ci    = ctk.CTkImage(light_image=img, dark_image=img, size=(tw, th))
+        self.lbl_video.configure(image=ci, text="")
+        self._ci = ci
+
+        self.after(50, self._loop_camara)
+
+    def _dibujar_ovalo(self, frame):
+        """Óvalo guía con color según estado y efecto de pulso."""
+        h, w  = frame.shape[:2]
+        cx, cy = w // 2, h // 2
+        rx, ry = int(w * 0.28), int(h * 0.44)
+
+        colores = {
+            "escaneando" : (160, 160, 160),
+            "liveness"   : (35,  166, 245),
+            "verificando": (0,   212, 170),
+            "exito"      : (0,   212, 170),
+            "salida"     : (35,  166, 245),
+            "denegado"   : (74,  75,  226),
+        }
+        color = colores.get(self.estado, (120, 120, 120))
+
+        # Pulso externo en modo escaneando
+        if self.estado == "escaneando":
+            alpha = 0.3 + 0.2 * (self._pulso_fase / 5)
+            ov    = frame.copy()
+            cv2.ellipse(ov, (cx, cy),
+                        (rx + 10, ry + 10), 0, 0, 360, color, 1)
+            cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0, frame)
+
+        # Óvalo principal
+        cv2.ellipse(frame, (cx, cy), (rx, ry), 0, 0, 360, color, 2)
+
+        return frame
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  CIERRE
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _cerrar(self):
+        self.camara_activa = False
+        if self._pulso_job:
+            self.after_cancel(self._pulso_job)
+        if self._prog_job:
+            self.after_cancel(self._prog_job)
+        if self.cap:
+            self.cap.release()
+        self.destroy()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOOP PRINCIPAL
+#  INTEGRACIÓN CON ReconocimientoFacial.py
 # ══════════════════════════════════════════════════════════════════════════════
+"""
+Agrega esto en __init__ después de self._set_estado("escaneando"):
 
-def iniciar():
-    print("[INFO] Cargando encodings desde BD...")
-    encodings_bd, ids_bd = cargar_encodings_bd()
+    from entrenadoRF import cargar_encodings_bd
+    from ReconocimientoFacial import hilo_reconocimiento, EstadoSistema
 
-    if not encodings_bd:
-        print("[ERROR] Sin encodings. Ejecuta capturar_rostro.py.")
-        return
+    self.enc_bd, self.ids_bd = cargar_encodings_bd()
+    self.estado_rf = EstadoSistema()
 
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-
-    estado = EstadoSistema()
-
-    hilo = threading.Thread(
+    threading.Thread(
         target=hilo_reconocimiento,
-        args=(estado, encodings_bd, ids_bd),
+        args=(self.estado_rf, self.enc_bd, self.ids_bd),
         daemon=True
-    )
-    hilo.start()
+    ).start()
+    self._poll_reconocimiento()
 
-    modo_login         = False
-    credenciales_login = None
-    ultimo_frame       = None
-    ultimo_resultado   = None
-    frame_count        = 0
+Agrega este método a la clase:
 
-    print("[INFO] Sistema activo")
-    print("       ESC=salir | M=manual | L=login | R=recargar")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_count  += 1
-        ultimo_frame  = frame.copy()
-        h, w          = frame.shape[:2]
-
-        # Enviar frame al hilo de reconocimiento (1 de cada 3)
-        if frame_count % 3 == 0 and estado.fase not in (
-                EstadoSistema.PAUSA, EstadoSistema.RESULTADO):
-            estado.poner_frame(frame)
-
-        # ── FASE: PAUSA ────────────────────────────────────────────────────
-        if estado.fase == EstadoSistema.PAUSA:
-            estado.verificar_pausa()
-            msg = estado.mensaje_resultado
-            if msg:
-                dibujar_ovalo(frame, msg.get("ovalo_color", OVALO_COLOR_ESPERA), 4)
-                dibujar_resultado(frame, msg)
-                seg       = (datetime.now() - estado.tiempo_pausa).total_seconds()
-                restante  = max(0.0, PAUSA_SEG - seg)
-                dibujar_barra_progreso(frame, 1.0 - restante / PAUSA_SEG,
-                                       msg["color"])
-            cv2.imshow("FaceAccess", frame)
-            k = cv2.waitKey(1) & 0xFF
-            if k == 27:
-                break
-            continue
-
-        # ── Tomar resultado del hilo ───────────────────────────────────────
-        resultado = estado.tomar_resultado_hilo()
-        if resultado:
-            ultimo_resultado = resultado
-
-        # ── Determinar fase según resultado ───────────────────────────────
-        sin_rostro = (not ultimo_resultado or
-                      ultimo_resultado.get("tipo") == "sin_rostro")
-
-        if sin_rostro:
-            estado.fase = EstadoSistema.ESPERANDO
-            estado.detector_parpadeo.reset()
-            estado.buffer_ids   = []
-            estado.progreso_barra = 0.0
-
-        else:
-            coords     = ultimo_resultado["coords"]
-            top, right, bottom, left = coords
-            alto_rostro = bottom - top
-            distancia_val = validar_distancia(h, alto_rostro)
-
-            if distancia_val != "ok":
-                estado.fase = EstadoSistema.DETECTADO
-                estado.detector_parpadeo.reset()
-                estado.buffer_ids = []
+    def _poll_reconocimiento(self):
+        res = self.estado_rf.tomar_resultado_hilo()
+        if res and res.get('tipo') == 'rostro':
+            from db_manager import obtener_usuario_por_id, tiene_entrada_abierta
+            id_u = res.get('id_usuario')
+            if id_u:
+                u      = obtener_usuario_por_id(id_u)
+                nombre = f"{u['nombre']} {u['apellido_p']}"
+                estado = 'exito' if not tiene_entrada_abierta(id_u) else 'salida'
+                self._set_estado(estado, nombre=nombre,
+                                 matricula=u['matricula'],
+                                 rol=u['nombre_rol'])
             else:
-                # Distancia correcta — verificar liveness
-                if estado.fase in (EstadoSistema.ESPERANDO,
-                                    EstadoSistema.DETECTADO):
-                    estado.fase = EstadoSistema.LIVENESS
-
-                if estado.fase == EstadoSistema.LIVENESS:
-                    gray_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    ear      = obtener_ear_frame(gray_rgb, coords)
-
-                    if ear is not None:
-                        vivo = estado.detector_parpadeo.actualizar(ear)
-                        estado.progreso_barra = (
-                            estado.detector_parpadeo.progreso * 0.4
-                        )
-                        if vivo:
-                            estado.fase = EstadoSistema.VERIFICANDO
-
-                if estado.fase == EstadoSistema.VERIFICANDO:
-                    estado.buffer_ids.append(
-                        ultimo_resultado.get("id_usuario")
-                    )
-                    estado.progreso_barra = (
-                        0.4 + (len(estado.buffer_ids) / FRAMES_CONFIRM) * 0.6
-                    )
-
-                    if len(estado.buffer_ids) >= FRAMES_CONFIRM:
-                        conteo   = Counter(estado.buffer_ids)
-                        id_final = conteo.most_common(1)[0][0]
-                        ultimo_resultado["id_usuario"] = id_final
-
-                        if not modo_login:
-                            registrar_acceso(ultimo_resultado, estado)
-                        else:
-                            if credenciales_login:
-                                m, c = credenciales_login
-                                u    = procesar_login_admin(
-                                    encodings_bd, ids_bd, m, c,
-                                    ultimo_resultado
-                                )
-                                if u:
-                                    estado.corriendo = False
-                                    cap.release()
-                                    cv2.destroyAllWindows()
-                                    abrir_interfaz_registro(u)
-                                    estado.corriendo = True
-                                    encodings_bd, ids_bd = cargar_encodings_bd()
-                                    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-                                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                                    hilo = threading.Thread(
-                                        target=hilo_reconocimiento,
-                                        args=(estado, encodings_bd, ids_bd),
-                                        daemon=True
-                                    )
-                                    hilo.start()
-                            modo_login         = False
-                            credenciales_login = None
-                            if estado.fase != EstadoSistema.PAUSA:
-                                estado.fase = EstadoSistema.ESPERANDO
-
-        # ── DIBUJAR UI según fase ──────────────────────────────────────────
-
-        if estado.fase == EstadoSistema.ESPERANDO:
-            dibujar_ovalo(frame, OVALO_COLOR_ESPERA, 2)
-            dibujar_instruccion(frame, "Coloca tu rostro en el ovalo",
-                                (200, 200, 200))
-
-        elif estado.fase == EstadoSistema.DETECTADO:
-            dibujar_ovalo(frame, OVALO_COLOR_DETECTADO, 3)
-            if distancia_val == "acercate":
-                dibujar_instruccion(frame, "Acercate a la camara",
-                                    (0, 200, 255))
-            else:
-                dibujar_instruccion(frame, "Alejate un poco",
-                                    (0, 200, 255))
-
-        elif estado.fase == EstadoSistema.LIVENESS:
-            dibujar_ovalo(frame, OVALO_COLOR_LISTO, 3)
-            dibujar_instruccion(frame, "Parpadea para confirmar",
-                                (0, 255, 0))
-            dibujar_barra_progreso(frame, estado.progreso_barra,
-                                   OVALO_COLOR_LISTO)
-
-        elif estado.fase == EstadoSistema.VERIFICANDO:
-            dibujar_ovalo(frame, OVALO_COLOR_LISTO, 4)
-            dibujar_instruccion(frame, "Verificando identidad...",
-                                (0, 255, 150))
-            dibujar_barra_progreso(frame, estado.progreso_barra,
-                                   (0, 255, 150))
-
-        # Banner login admin
-        if modo_login:
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (0, h - 45), (w, h), (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
-            cv2.putText(frame, "LOGIN ADMIN — Parpadea para confirmar",
-                        (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.55, (255, 200, 0), 1, cv2.LINE_AA)
-
-        cv2.imshow("FaceAccess", frame)
-        k = cv2.waitKey(1) & 0xFF
-
-        if k == 27:
-            break
-
-        elif k == ord("m") or k == ord("M"):
-            if estado.fase == EstadoSistema.ESPERANDO:
-                procesar_acceso_manual(ultimo_frame)
-                estado.iniciar_pausa({
-                    "linea1": "Acceso manual registrado",
-                    "linea2": datetime.now().strftime("%d/%m/%Y  %H:%M:%S"),
-                    "linea3": "ACCESO MANUAL",
-                    "color": (255, 165, 0),
-                    "ovalo_color": (255, 165, 0)
-                })
-
-        elif k == ord("l") or k == ord("L"):
-            if estado.fase == EstadoSistema.ESPERANDO and not modo_login:
-                print("\n[INFO] LOGIN ADMIN")
-                matricula          = input("Matricula : ").strip()
-                contrasenia        = input("Contrasena: ").strip()
-                credenciales_login = (matricula, contrasenia)
-                modo_login         = True
-                print("[INFO] Coloca tu rostro y parpadea.")
-
-        elif k == ord("r") or k == ord("R"):
-            print("[INFO] Recargando encodings...")
-            encodings_bd, ids_bd = cargar_encodings_bd()
-            print(f"[OK] {len(encodings_bd)} encoding(s) cargados.")
-
-    estado.corriendo = False
-    hilo.join(timeout=2)
-    cap.release()
-    cv2.destroyAllWindows()
-    print("[INFO] Sistema detenido.")
-
+                self._set_estado('denegado')
+        self.after(100, self._poll_reconocimiento)
+"""
 
 if __name__ == "__main__":
-    iniciar()
+    app = FaceAccessKiosk()
+
+    # Simulación de flujo completo para pruebas de diseño
+    app.after(2500, lambda: app._set_estado("liveness"))
+    app.after(4500, lambda: app._set_estado("verificando"))
+    app.after(6000, lambda: app._set_estado(
+        "exito",
+        nombre="Genesis Martinez",
+        matricula="ALU2024001",
+        rol="Alumno",
+        ultimo_acceso="Hoy 08:15 AM"
+    ))
+
+    app.mainloop()
