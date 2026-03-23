@@ -18,7 +18,6 @@ import customtkinter as ctk
 import cv2
 
 # Importamos todas tus pantallas y el gestor
-
 import gestor_db
 print(f"DEBUG: Usuarios en BD: {gestor_db.obtener_usuarios()}")
 
@@ -33,6 +32,7 @@ app.title("Sistema Biométrico - Universidad de Colima")
 app.geometry("900x600")
 
 marco_actual = None
+admin_actual_matricula = None # <--- Variable global para rastrear quién está usando la app
 
 def mostrar_login():
     global marco_actual
@@ -53,7 +53,7 @@ def mostrar_exito(nombre, matricula):
     
     marco_actual = admin_Exito.crear_vista(
         padre=app, 
-        comando_finalizar=lambda: mostrar_inicio(nombre), 
+        comando_finalizar=lambda: mostrar_inicio(nombre, matricula),
         nombre=nombre,
         matricula=matricula,
         ruta_foto=ruta_de_la_foto
@@ -66,7 +66,7 @@ def mostrar_error(mensaje="Acceso denegado"):
         marco_actual.destroy()
     
     print(f"DEBUG - Motivo de error: {mensaje}")
-    # Guardamos el registro fallido (usamos "0000" como genérico si no sabemos quién fue)
+    # Guardamos el registro fallido (usamos "0000" como genérico)
     gestor_db.registrar_acceso("0000", "Denegado")
     
     marco_actual = admin_Error.crear_vista(
@@ -76,25 +76,51 @@ def mostrar_error(mensaje="Acceso denegado"):
     )
     marco_actual.pack(fill="both", expand=True)
 
-def mostrar_inicio(nombre):
-    global marco_actual
+def cerrar_sesion(matricula):
+    global admin_actual_matricula
+    print(f"DEBUG - Cerrando sesión de: {matricula}")
+    if matricula:
+        gestor_db.registrar_acceso(matricula, "Salida")
+    admin_actual_matricula = None # Limpiamos el usuario activo
+    mostrar_login()
+
+def mostrar_inicio(nombre, matricula=None): 
+    global marco_actual, admin_actual_matricula
+    
+    admin_actual_matricula = matricula  
+    
     if marco_actual is not None:
         marco_actual.destroy()
         
     lista_real = gestor_db.obtener_usuarios()
+    
+    # === DESCUBRIR ROL DEL USUARIO ROBUSTO ===
+    rol_actual = "Admins"
+    for u in lista_real:
+        if str(u.get("matricula")) == str(matricula):
+            r = str(u.get("rol", "ADMIN")).upper()
+            if r == "ADMIN": rol_actual = "Admins"
+            elif r == "DIRECTIVO": rol_actual = "Directivos"
+            elif r in ["PROFESOR", "PROFESORES"]: rol_actual = "Profesores"
+            elif r in ["ALUMNO", "ALUMNADO"]: rol_actual = "Alumnado"
+            break
+            
+    print(f"DEBUG - Sesión iniciada por: {nombre} | Rol: {rol_actual}")
         
     marco_actual = inicioAdmin.crear_vista(
         padre=app, 
         nombre_admin=nombre, 
+        matricula_admin=matricula,
+        rol_admin=rol_actual,
         lista_usuarios=lista_real, 
-        comando_recargar=lambda: mostrar_inicio(nombre),
-        comando_cerrar_sesion=mostrar_login,
-        comando_ir_inicio=lambda: mostrar_inicio(nombre),
-        comando_ir_registros=lambda: mostrar_registros(nombre)
+        comando_recargar=lambda: mostrar_inicio(nombre, matricula),
+        comando_cerrar_sesion=lambda: cerrar_sesion(matricula), 
+        comando_ir_inicio=lambda: mostrar_inicio(nombre, matricula),
+        comando_ir_registros=lambda: mostrar_registros(nombre, matricula, rol_actual)
     )
     marco_actual.pack(fill="both", expand=True)
-
-def mostrar_registros(nombre):
+    
+def mostrar_registros(nombre, matricula=None, rol_actual="Admins"): 
     global marco_actual
     if marco_actual is not None:
         marco_actual.destroy()
@@ -105,12 +131,23 @@ def mostrar_registros(nombre):
     marco_actual = registrosAdmin.crear_vista(
         padre=app, 
         nombre_admin=nombre, 
+        matricula_admin=matricula,
         lista_registros=lista_registros_reales, 
-        comando_cerrar_sesion=mostrar_login,
-        comando_ir_inicio=lambda: mostrar_inicio(nombre),
-        comando_ir_registros=lambda: mostrar_registros(nombre)
+        comando_cerrar_sesion=lambda: cerrar_sesion(matricula),
+        comando_ir_inicio=lambda: mostrar_inicio(nombre, matricula),
+        comando_ir_registros=lambda: mostrar_registros(nombre, matricula, rol_actual)
     )
     marco_actual.pack(fill="both", expand=True)
+
+# === FUNCIÓN PARA CUANDO LE DAN A LA "X" DE LA VENTANA ===
+def al_cerrar_ventana():
+    global admin_actual_matricula
+    if admin_actual_matricula:
+        print(f"DEBUG - Registrando salida por cierre de ventana: {admin_actual_matricula}")
+        gestor_db.registrar_acceso(admin_actual_matricula, "Salida")
+    app.destroy()
+
+app.protocol("WM_DELETE_WINDOW", al_cerrar_ventana)
 
 # Iniciar la aplicación en la pantalla de Login
 mostrar_login()

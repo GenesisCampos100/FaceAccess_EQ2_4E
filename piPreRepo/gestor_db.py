@@ -95,16 +95,28 @@ def obtener_usuario_por_matricula(matricula):
     conn.close()
     return resultado
 
-def modificar_usuario(matricula_original, matricula_nueva, nombre, apellido_p, apellido_m, contrasenia, id_rol):
+def modificar_usuario(matricula, nombre, apellido_p, apellido_m, contrasenia, id_rol):
     try:
         conexion = sqlite3.connect(DB_NOMBRE)
         cursor = conexion.cursor()
-        consulta = """
-            UPDATE usuarios 
-            SET matricula = ?, nombre = ?, apellido_p = ?, apellido_m = ?, contrasenia = ?, id_rol = ?
-            WHERE matricula = ?
-        """
-        cursor.execute(consulta, (matricula_nueva, nombre, apellido_p, apellido_m, contrasenia, id_rol, matricula_original))
+        
+        # Si la contraseña viene vacía, actualizamos todo MENOS la contraseña
+        if contrasenia.strip() == "":
+            consulta = """
+                UPDATE usuarios 
+                SET nombre = ?, apellido_p = ?, apellido_m = ?, id_rol = ?
+                WHERE matricula = ?
+            """
+            cursor.execute(consulta, (nombre, apellido_p, apellido_m, id_rol, matricula))
+        else:
+            # Si escribieron algo, actualizamos también la contraseña
+            consulta = """
+                UPDATE usuarios 
+                SET nombre = ?, apellido_p = ?, apellido_m = ?, contrasenia = ?, id_rol = ?
+                WHERE matricula = ?
+            """
+            cursor.execute(consulta, (nombre, apellido_p, apellido_m, contrasenia, id_rol, matricula))
+            
         conexion.commit()
         return True
     except sqlite3.Error as error:

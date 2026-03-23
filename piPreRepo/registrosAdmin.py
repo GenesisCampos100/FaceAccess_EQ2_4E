@@ -1,14 +1,15 @@
 import customtkinter as ctk
 import navbarAdmin
+from datetime import datetime, timedelta
 
-def crear_vista(padre, nombre_admin="Usuario", lista_registros=None, comando_cerrar_sesion=None, comando_ir_inicio=None, comando_ir_registros=None):
+def crear_vista(padre, nombre_admin="Usuario", matricula_admin=None, lista_registros=None, comando_cerrar_sesion=None, comando_ir_inicio=None, comando_ir_registros=None):
     if lista_registros is None:
         lista_registros = []
 
     frame = ctk.CTkFrame(padre, fg_color="#1a202c", corner_radius=0)
     
     # --- 1. NAVBAR ---
-    navbarAdmin.crear_navbar(frame, nombre_admin, comando_cerrar_sesion, comando_ir_inicio, comando_ir_registros)
+    navbarAdmin.crear_navbar(frame, nombre_admin, matricula_admin, comando_cerrar_sesion, comando_ir_inicio, comando_ir_registros)
 
     # ==========================================
     # 2. CONTENIDO PRINCIPAL
@@ -30,10 +31,10 @@ def crear_vista(padre, nombre_admin="Usuario", lista_registros=None, comando_cer
     controles_frame = ctk.CTkFrame(filtros_frame, fg_color="transparent")
     controles_frame.pack(fill="x")
     
-    entry_buscar = ctk.CTkEntry(controles_frame, placeholder_text="Buscar por matrícula...", width=250, height=35)
+    entry_buscar = ctk.CTkEntry(controles_frame, placeholder_text="Buscar por matrícula o nombre...", width=250, height=35)
     entry_buscar.pack(side="left", padx=(0, 10))
     
-    combo_estado = ctk.CTkOptionMenu(controles_frame, values=["Todos los estados", "Aceptado", "Denegado"], width=150, height=35, fg_color="#3E4A61")
+    combo_estado = ctk.CTkOptionMenu(controles_frame, values=["Todos los estados", "Aceptado", "Denegado", "Salida"], width=150, height=35, fg_color="#3E4A61")
     combo_estado.pack(side="left", padx=(0, 10))
     
     combo_fecha = ctk.CTkOptionMenu(controles_frame, values=["Cualquier fecha", "Hoy", "Ayer", "Últimos 7 días"], width=150, height=35, fg_color="#3E4A61")
@@ -67,7 +68,7 @@ def crear_vista(padre, nombre_admin="Usuario", lista_registros=None, comando_cer
             widget.destroy()
             
         if not registros_a_mostrar:
-            ctk.CTkLabel(scroll_tabla, text="No hay registros para mostrar.", font=("Arial", 14, "italic"), text_color="#7F8C8D").pack(pady=50)
+            ctk.CTkLabel(scroll_tabla, text="No hay registros que coincidan con tu búsqueda.", font=("Arial", 14, "italic"), text_color="#7F8C8D").pack(pady=50)
             return
 
         for r in registros_a_mostrar:
@@ -79,10 +80,15 @@ def crear_vista(padre, nombre_admin="Usuario", lista_registros=None, comando_cer
             ctk.CTkLabel(fila, text=r.get("nombre", "N/A"), font=("Arial", 13), text_color="#2C394B", width=w_nom, anchor="w").pack(side="left", padx=10)
             ctk.CTkLabel(fila, text=r.get("fecha_hora", "N/A"), font=("Arial", 13), text_color="#7F8C8D", width=w_fec, anchor="w").pack(side="left", padx=10)
             
-            # --- PILL DE ESTADO (Verde o Rojo) ---
             estado = r.get("estado", "Desconocido")
-            color_fondo = "#D5F5E3" if estado == "Aceptado" else "#FADBD8" 
-            color_texto = "#27AE60" if estado == "Aceptado" else "#C0392B" 
+            if estado == "Aceptado":
+                color_fondo, color_texto = "#D5F5E3", "#27AE60" 
+            elif estado == "Denegado":
+                color_fondo, color_texto = "#FADBD8", "#C0392B" 
+            elif estado == "Salida":
+                color_fondo, color_texto = "#D4E6F1", "#2980B9" 
+            else:
+                color_fondo, color_texto = "#E5E7E9", "#7F8C8D" 
             
             estado_container = ctk.CTkFrame(fila, fg_color="transparent", width=w_est)
             estado_container.pack(side="left", padx=10)
@@ -95,16 +101,50 @@ def crear_vista(padre, nombre_admin="Usuario", lista_registros=None, comando_cer
             
             ctk.CTkFrame(scroll_tabla, fg_color="#E5E7E9", height=1).pack(fill="x", padx=10, pady=2)
 
+    # ==========================================
+    # LÓGICA DE FILTROS 100% FUNCIONAL
+    # ==========================================
     def aplicar_filtros():
         texto = entry_buscar.get().lower()
         estado_sel = combo_estado.get()
+        fecha_sel = combo_fecha.get()
+        
+        # Calculamos las fechas relativas a HOY
+        ahora = datetime.now().date()
+        ayer = ahora - timedelta(days=1)
+        hace_7_dias = ahora - timedelta(days=7)
         
         filtrados = []
         for r in lista_registros:
-            coincide_texto = texto in str(r.get("matricula", "")).lower()
+            # 1. Filtro de Búsqueda (Texto)
+            mat_str = str(r.get("matricula", "")).lower()
+            nom_str = str(r.get("nombre", "")).lower()
+            coincide_texto = (texto in mat_str) or (texto in nom_str)
+            
+            # 2. Filtro de Estado
             coincide_estado = (estado_sel == "Todos los estados") or (r.get("estado", "") == estado_sel)
             
-            if coincide_texto and coincide_estado:
+            # 3. Filtro de Fecha
+            coincide_fecha = True
+            if fecha_sel != "Cualquier fecha":
+                fecha_str = r.get("fecha_hora", "") # Viene como "YYYY-MM-DD HH:MM:SS"
+                try:
+                    # Extraemos solo "YYYY-MM-DD"
+                    solo_fecha_str = fecha_str.split(" ")[0]
+                    fecha_registro = datetime.strptime(solo_fecha_str, "%Y-%m-%d").date()
+                    
+                    if fecha_sel == "Hoy":
+                        coincide_fecha = (fecha_registro == ahora)
+                    elif fecha_sel == "Ayer":
+                        coincide_fecha = (fecha_registro == ayer)
+                    elif fecha_sel == "Últimos 7 días":
+                        coincide_fecha = (fecha_registro >= hace_7_dias)
+                except Exception as e:
+                    # Si un registro está dañado o no tiene fecha válida, lo ocultamos
+                    coincide_fecha = False
+            
+            # Si pasa TODAS las pruebas, se muestra
+            if coincide_texto and coincide_estado and coincide_fecha:
                 filtrados.append(r)
         
         renderizar_tabla(filtrados)
