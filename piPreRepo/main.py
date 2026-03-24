@@ -108,5 +108,8 @@ def mostrar_registros(nombre):
     marco_actual.pack(fill="both", expand=True)
 
 # Iniciar la aplicación en la pantalla de Login
-mostrar_login()
+#mostrar_login()
+
+mostrar_inicio("Admin")
+
 app.mainloop()

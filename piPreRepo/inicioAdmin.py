@@ -1,10 +1,14 @@
 import customtkinter as ctk
 from datetime import datetime
+import numpy as np
+import cv2
 import navbarAdmin
 import gestor_db
-import cv2
 import os
 from PIL import Image
+
+
+from capturar_imagen import procesar_rostro
 
 def crear_vista(padre, nombre_admin="Usuario", lista_usuarios=None, comando_recargar=None, comando_cerrar_sesion=None, comando_ir_inicio=None, comando_ir_registros=None):
     if lista_usuarios is None:
@@ -26,69 +30,21 @@ def crear_vista(padre, nombre_admin="Usuario", lista_usuarios=None, comando_reca
 
     # --- MODAL AÑADIR CON SOLUCIÓN DE CÁMARA ---
     def abrir_modal_agregar():
+
+        biometria_registrada = [False]
         modal = ctk.CTkToplevel(padre)
         modal.title("Añadir Nuevo Usuario")
         modal.geometry("450x780")
         modal.attributes("-topmost", True)
         modal.grab_set()
+        imagen_capturada = [None]
 
         ctk.CTkLabel(modal, text="Registro Biométrico", font=("Arial", 22, "bold")).pack(pady=(20, 5))
 
-        # Contenedor de la cámara
-        label_camara = ctk.CTkLabel(modal, text="Cargando lente...", width=320, height=240, fg_color="black", corner_radius=10)
-        label_camara.pack(pady=10)
-
-        # Variables de control
-        cap_container = [None] # Usamos lista para poder modificarla dentro de funciones
-        ultimo_frame = [None]
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
+    
         def cerrar_modal():
-            if cap_container[0] and cap_container[0].isOpened():
-                cap_container[0].release()
             modal.destroy()
 
-        def actualizar_frame():
-            if not modal.winfo_exists():
-                if cap_container[0]: cap_container[0].release()
-                return
-
-            if cap_container[0] and cap_container[0].isOpened():
-                ret, frame_cv = cap_container[0].read()
-                if ret:
-                    ultimo_frame[0] = frame_cv.copy()
-                    
-                    # Detección y dibujo
-                    gray = cv2.cvtColor(frame_cv, cv2.COLOR_BGR2GRAY)
-                    rostros = face_cascade.detectMultiScale(gray, 1.3, 5)
-                    
-                    nombre_txt = entry_nom.get().strip()
-                    tag = nombre_txt if nombre_txt else "Encuadre su rostro"
-
-                    for (x, y, w, h) in rostros:
-                        cv2.rectangle(frame_cv, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        # Etiqueta con fondo para legibilidad
-                        cv2.rectangle(frame_cv, (x, y-30), (x+w, y), (0, 255, 0), -1)
-                        cv2.putText(frame_cv, tag, (x+5, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 2)
-
-                    frame_rgb = cv2.cvtColor(frame_cv, cv2.COLOR_BGR2RGB)
-                    img_pil = Image.fromarray(frame_rgb)
-                    img_ctk = ctk.CTkImage(light_image=img_pil, size=(320, 240))
-                    label_camara.configure(image=img_ctk, text="")
-                    label_camara.image = img_ctk
-
-            modal.after(20, actualizar_frame)
-
-        # --- INICIO RETARDADO DE CÁMARA (La clave de la solución) ---
-        def iniciar_recursos():
-            # Intentamos liberar cualquier instancia previa que haya quedado colgada
-            temp_cap = cv2.VideoCapture(0)
-            if not temp_cap.isOpened():
-                label_camara.configure(text="Error: Cámara ocupada por otro proceso")
-            cap_container[0] = temp_cap
-            actualizar_frame()
-
-        modal.after(500, iniciar_recursos) # Esperamos medio segundo a que el modal se asiente
 
         # --- VALIDACIONES ---
         def v_m(e, w):
@@ -114,29 +70,135 @@ def crear_vista(padre, nombre_admin="Usuario", lista_usuarios=None, comando_reca
         entry_pass = ctk.CTkEntry(modal, placeholder_text="Contraseña", width=300, show="*"); entry_pass.pack(pady=5)
         
         combo_rol = ctk.CTkOptionMenu(modal, values=list(roles_map.keys()), width=300); combo_rol.set("Alumnado"); combo_rol.pack(pady=10)
+
+        ctk.CTkButton(
+            modal,
+            text="📸 Capturar Rostro",
+            fg_color="#3498DB",
+            command=lambda: abrir_captura_biometrica(entry_mat.get())
+        ).pack(pady=10)
+
+        preview_img = ctk.CTkLabel(modal, text="Sin imagen", width=120, height=120, fg_color="gray")
+        preview_img.pack(pady=10)
         
         lbl_err = ctk.CTkLabel(modal, text="", text_color="red"); lbl_err.pack()
 
         def guardar():
             mat = entry_mat.get()
-            if len(mat) != 8 or not entry_nom.get() or ultimo_frame[0] is None:
-                lbl_err.configure(text="⚠️ Datos incompletos o falta rostro")
+
+            if len(mat) != 8 or not entry_nom.get():
+                lbl_err.configure(text="⚠️ Datos incompletos")
                 return
-            
-            if gestor_db.agregar_usuario(mat, entry_nom.get(), entry_ap.get(), entry_am.get(), entry_pass.get(), roles_map[combo_rol.get()]):
-                os.makedirs("capturas", exist_ok=True)
-                cv2.imwrite(f"capturas/{mat}.jpg", ultimo_frame[0])
+
+            if not biometria_registrada[0]:
+                lbl_err.configure(text="⚠️ Debe capturar el rostro primero")
+                return
+
+            if gestor_db.agregar_usuario(
+                mat,
+                entry_nom.get(),
+                entry_ap.get(),
+                entry_am.get(),
+                entry_pass.get(),
+                roles_map[combo_rol.get()]
+            ):
                 cerrar_modal()
-                if comando_recargar: comando_recargar()
+
+                if comando_recargar:
+                    comando_recargar()
             else:
-                lbl_err.configure(text="⚠️ Error al guardar (Matrícula duplicada)")
+                lbl_err.configure(text="⚠️ Matrícula duplicada")
 
         btns = ctk.CTkFrame(modal, fg_color="transparent")
         btns.pack(pady=20)
         ctk.CTkButton(btns, text="Cancelar", fg_color="#E74C3C", command=cerrar_modal).pack(side="left", padx=10)
         ctk.CTkButton(btns, text="Guardar", fg_color="#2ECC71", command=guardar).pack(side="left", padx=10)
 
-        modal.protocol("WM_DELETE_WINDOW", cerrar_modal)
+
+        def abrir_captura_biometrica(matricula):
+
+            if len(matricula) != 8:
+                lbl_err.configure(text="⚠️ Ingresa matrícula válida primero")
+                return
+
+            ventana_cam = ctk.CTkToplevel(modal)
+            ventana_cam.title("Captura Biométrica")
+            ventana_cam.geometry("400x400")
+
+            label_video = ctk.CTkLabel(ventana_cam, text="")
+            label_video.pack(pady=10)
+
+            cap = cv2.VideoCapture(0)
+            frame_actual = [None]
+
+            
+            def cerrar():
+                cap.release()
+                ventana_cam.destroy()
+
+                ventana_cam.protocol("WM_DELETE_WINDOW", cerrar)
+
+            def actualizar():
+                ret, frame = cap.read()
+                if ret:
+                    frame_actual[0] = frame.copy()
+
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(rgb)
+                    imgtk = ctk.CTkImage(light_image=img, size=(320,240))
+
+                    label_video.configure(image=imgtk)
+                    label_video.image = imgtk
+
+                ventana_cam.after(20, actualizar)
+
+            actualizar()
+
+            frame_botones = ctk.CTkFrame(ventana_cam)
+            frame_botones.pack(pady=10)
+
+            def capturar():
+                if frame_actual[0] is None:
+                    return
+
+                procesar_captura(frame_actual[0], matricula)
+
+            def cerrar():
+                cap.release()
+                ventana_cam.destroy()
+
+            ctk.CTkButton(frame_botones, text="📸 Capturar", command=capturar).pack(side="left", padx=10)
+            ctk.CTkButton(frame_botones, text="❌ Cancelar", command=cerrar).pack(side="left", padx=10)
+
+            def procesar_captura(frame, matricula):
+
+                exito, mensaje = procesar_rostro(frame, matricula)
+
+                if exito:
+                    lbl_err.configure(text=f"✅ {mensaje}")
+                    biometria_registrada[0] = True
+
+                    # 🔥 GUARDAR EN MEMORIA
+                    imagen_capturada[0] = frame
+
+                    # 🔥 MOSTRAR EN EL MODAL
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(rgb)
+                    img_ctk = ctk.CTkImage(light_image=img, size=(120,120))
+
+                    preview_img.configure(image=img_ctk, text="")
+                    preview_img.image = img_ctk
+
+                    # 🔥 GUARDAR EN DISCO
+                    os.makedirs("capturas", exist_ok=True)
+                    cv2.imwrite(f"capturas/{matricula}.jpg", frame)
+
+                    # 🔥 SOLO cerrar ventana de cámara (NO el modal)
+                    cap.release()
+                    ventana_cam.destroy()
+
+                else:
+                    lbl_err.configure(text=f"⚠️ {mensaje}")
 
     # --- BOTÓN AÑADIR ---
     ctk.CTkButton(frame, text="⊕ Añadir Usuario", fg_color="#3E4A61", command=abrir_modal_agregar).pack(anchor="e", padx=40, pady=(0, 20))
