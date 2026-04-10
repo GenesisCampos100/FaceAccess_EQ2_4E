@@ -1,158 +1,223 @@
 """
-entrenadoRF.py — Verificador de encodings para face_recognition.
-
-Diferencia vs LBPH:
-  · Con LBPH este archivo entrenaba un modelo XML cada vez que agregabas alguien.
-  · Con face_recognition NO hay modelo que entrenar.
-    Los encodings ya se generan en capturar_rostro.py y se guardan en la BD.
-  · Este archivo ahora sirve para VERIFICAR que todos los usuarios tienen
-    su encoding correcto y está listo para el reconocimiento.
-
-Úsalo para:
-  · Confirmar que todos los usuarios tienen encoding en BD antes de correr
-    el reconocimiento.
-  · Detectar usuarios sin encoding (a quienes les falta capturar rostro).
-  · Regenerar encodings desde las fotos guardadas si algo se corrompió.
+entrenadoRF.py — Entrenamiento y verificación del modelo LBPH.
 """
 
 import cv2
 import os
-import json
+import sys
 import numpy as np
-import face_recognition
 from db_manager import (
     obtener_todos_encodings,
     obtener_usuario_por_id,
     obtener_personas,
     tiene_biometrico,
-    guardar_encoding,
+    DATA_DIR,
 )
 
-DATA_PATH = "C:/xampp/htdocs/FaceAccess_EQ2_4E/data"
+# ─── Rutas y parámetros ───────────────────────────────────────────────────────
+MODELO_LBPH      = "modelo_lbph.xml"   # archivo donde se persiste el modelo
+FACE_SIZE        = (200, 200)          # tamaño al que se normalizan los rostros
+HAAR_CASCADE     = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
 
-# ─── Verificar estado de encodings ────────────────────────────────────────────
+# ─── Crear detector Haar ──────────────────────────────────────────────────────
+def crear_detector_haar():
+    """
+    Crea el detector de rostros con Haar Cascade.
+    Haar Cascade es un método clásico basado en características de Haar
+    y clasificadores en cascada de Adaboost. No usa redes neuronales.
+    """
+    detector = cv2.CascadeClassifier(HAAR_CASCADE)
+    if detector.empty():
+        raise RuntimeError(f"No se pudo cargar: {HAAR_CASCADE}")
+    print(f"[INFO] Haar Cascade cargado: {HAAR_CASCADE}")
+    return detector
+
+
+# ─── Verificar estado de imágenes por usuario ────────────────────────────────
 def verificar_encodings():
     """
-    Muestra el estado de encodings de todos los usuarios activos.
+    Muestra el estado de imágenes de todos los usuarios activos.
+    En LBPH el 'encoding' equivale a tener imágenes guardadas en disco.
     """
     print("\n" + "="*50)
-    print("  VERIFICACIÓN DE ENCODINGS")
+    print("  VERIFICACIÓN DE IMÁGENES (LBPH)")
     print("="*50)
 
-    personas = obtener_personas()   # [(id_usuario, nombre_completo)]
+    personas = obtener_personas()
 
     if not personas:
         print("[AVISO] No hay usuarios activos en la BD.")
-        return
+        return []
 
-    sin_encoding    = []
-    con_encoding    = []
+    sin_imagenes = []
+    con_imagenes = []
 
     for id_usuario, nombre in personas:
         if tiene_biometrico(id_usuario):
-            con_encoding.append((id_usuario, nombre))
-            print(f"  ✓ {nombre:<30} (ID {id_usuario}) — Encoding OK")
+            # Verificar que la carpeta exista y tenga imágenes
+            from db_manager import obtener_carpeta_usuario
+            carpeta = obtener_carpeta_usuario(id_usuario)
+            if os.path.isdir(carpeta):
+                imgs = [f for f in os.listdir(carpeta)
+                        if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+                if imgs:
+                    con_imagenes.append((id_usuario, nombre))
+                    print(f"  ✓ {nombre:<30} (ID {id_usuario}) — {len(imgs)} imágenes")
+                else:
+                    sin_imagenes.append((id_usuario, nombre))
+                    print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Carpeta vacía")
+            else:
+                sin_imagenes.append((id_usuario, nombre))
+                print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Sin carpeta en disco")
         else:
-            sin_encoding.append((id_usuario, nombre))
-            print(f"  ✗ {nombre:<30} (ID {id_usuario}) — SIN ENCODING")
+            sin_imagenes.append((id_usuario, nombre))
+            print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Sin registro biométrico")
 
     print("="*50)
-    print(f"  Con encoding   : {len(con_encoding)}")
-    print(f"  Sin encoding   : {len(sin_encoding)}")
+    print(f"  Con imágenes   : {len(con_imagenes)}")
+    print(f"  Sin imágenes   : {len(sin_imagenes)}")
     print("="*50)
 
-    if sin_encoding:
-        print("\n[AVISO] Los siguientes usuarios no tienen encoding:")
-        for id_u, nombre in sin_encoding:
+    if sin_imagenes:
+        print("\n[AVISO] Los siguientes usuarios necesitan captura de rostro:")
+        for id_u, nombre in sin_imagenes:
             print(f"  → {nombre} (ID {id_u}) — Ejecuta capturar_rostro.py")
 
-    return sin_encoding
+    return sin_imagenes
 
 
-# ─── Regenerar encodings desde fotos guardadas ───────────────────────────────
-def regenerar_encoding(id_usuario: int):
+# ─── Cargar dataset de imágenes para entrenamiento ───────────────────────────
+def cargar_dataset() -> tuple[list, list]:
     """
-    Si el encoding de un usuario se corrompió o perdió,
-    lo regenera leyendo las fotos de su carpeta en disco.
+    Recorre todas las carpetas de usuarios y carga sus imágenes como dataset.
+    Retorna (imagenes_grises, labels) donde:
+      - imagenes_grises: lista de arrays numpy en escala de grises (200x200)
+      - labels: lista de id_usuario (int) correspondiente a cada imagen
     """
-    usuario = obtener_usuario_por_id(id_usuario)
-    if not usuario:
-        print(f"[ERROR] Usuario ID {id_usuario} no encontrado.")
-        return False
+    datos = obtener_todos_encodings()   # [(id_usuario, ruta_carpeta)]
+    imagenes = []
+    labels   = []
 
-    nombre      = f"{usuario['nombre']}_{usuario['apellido_p']}"
-    folder_name = f"{id_usuario}_{nombre}"
-    person_path = os.path.join(DATA_PATH, folder_name)
+    for id_usuario, ruta_carpeta in datos:
+        if not ruta_carpeta or not os.path.isdir(ruta_carpeta):
+            print(f"[AVISO] Carpeta no encontrada para ID {id_usuario}: {ruta_carpeta}")
+            continue
 
-    if not os.path.exists(person_path):
-        print(f"[ERROR] Carpeta no encontrada: {person_path}")
-        print("[INFO] Debes ejecutar capturar_rostro.py para este usuario.")
-        return False
+        archivos = [f for f in os.listdir(ruta_carpeta)
+                    if f.lower().endswith((".jpg", ".jpeg", ".png"))]
 
-    imagenes = [f for f in os.listdir(person_path)
-                if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        if not archivos:
+            print(f"[AVISO] Sin imágenes en carpeta de ID {id_usuario}")
+            continue
+
+        for archivo in archivos:
+            ruta_img = os.path.join(ruta_carpeta, archivo)
+            img = cv2.imread(ruta_img, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                continue
+            # Normalizar tamaño para consistencia en el histograma LBP
+            img_res = cv2.resize(img, FACE_SIZE)
+            imagenes.append(img_res)
+            labels.append(id_usuario)   # label = id_usuario (entero)
+
+    print(f"[INFO] Dataset cargado: {len(imagenes)} imágenes de {len(set(labels))} usuarios.")
+    return imagenes, labels
+
+
+# ─── Entrenar modelo LBPH ────────────────────────────────────────────────────
+def entrenar() -> bool:
+    """
+    Entrena el reconocedor LBPH con todas las imágenes disponibles.
+    Guarda el modelo en MODELO_LBPH para que ReconocimientoFacial.py lo cargue.
+
+    LBPH (Local Binary Patterns Histogram):
+      - radius=1      → radio del patrón LBP (vecinos a 1 px de distancia)
+      - neighbors=8   → 8 vecinos por punto
+      - grid_x=8      → 8 celdas horizontales para el histograma
+      - grid_y=8      → 8 celdas verticales para el histograma
+      - threshold=∞   → sin umbral interno (lo manejamos nosotros al predecir)
+    """
+    imagenes, labels = cargar_dataset()
 
     if not imagenes:
-        print(f"[ERROR] No hay imágenes en {person_path}")
+        print("[ERROR] No hay imágenes para entrenar. Captura rostros primero.")
         return False
 
-    print(f"[INFO] Regenerando encoding desde {len(imagenes)} fotos...")
-    encodings = []
-
-    for file_name in imagenes:
-        ruta   = os.path.join(person_path, file_name)
-        imagen = face_recognition.load_image_file(ruta)
-        encs   = face_recognition.face_encodings(imagen)
-        if encs:
-            encodings.append(encs[0])
-
-    if not encodings:
-        print("[ERROR] No se detectaron rostros en las fotos guardadas.")
+    if len(set(labels)) < 1:
+        print("[ERROR] Se necesita al menos 1 usuario con imágenes.")
         return False
 
-    encoding_promedio = np.mean(encodings, axis=0)
-    encoding_str      = json.dumps(encoding_promedio.tolist())
-    guardar_encoding(id_usuario, encoding_str)
+    print(f"[INFO] Entrenando LBPH con {len(imagenes)} imágenes...")
 
-    nombre_completo = f"{usuario['nombre']} {usuario['apellido_p']}"
-    print(f"[OK] Encoding regenerado para: {nombre_completo}")
+    # Crear el reconocedor LBPH
+    # cv2.face.LBPHFaceRecognizer_create() requiere opencv-contrib-python
+    recognizer = cv2.face.LBPHFaceRecognizer_create(
+        radius=1,
+        neighbors=8,
+        grid_x=8,
+        grid_y=8
+    )
+
+    # El entrenamiento asigna a cada histograma LBP su label correspondiente
+    recognizer.train(imagenes, np.array(labels, dtype=np.int32))
+
+    # Guardar en disco para que el sistema de acceso lo cargue al iniciar
+    recognizer.save(MODELO_LBPH)
+    print(f"[OK] Modelo guardado en: {MODELO_LBPH}")
+    print(f"[OK] {len(set(labels))} usuario(s) en el modelo.")
     return True
 
 
-# ─── Cargar todos los encodings en memoria (para el reconocimiento) ───────────
-def cargar_encodings_bd() -> tuple[list, list]:
+# ─── Cargar modelo en memoria (para ReconocimientoFacial.py) ─────────────────
+def cargar_modelo_lbph():
     """
-    Carga todos los encodings de la BD en memoria.
-    Retorna (encodings_list, ids_list) para usar en face_recognition.compare_faces.
-    Llamado internamente por ReconocimientoFacial.py
+    Carga el modelo LBPH desde disco.
+    Llamado internamente por ReconocimientoFacial.py al iniciar.
+    Retorna el reconocedor, o None si no existe el archivo.
     """
-    datos = obtener_todos_encodings()   # [(id_usuario, encoding_str)]
+    if not os.path.exists(MODELO_LBPH):
+        print(f"[AVISO] Modelo LBPH no encontrado: {MODELO_LBPH}")
+        print("[INFO] Ejecuta entrenadoRF.py para generar el modelo.")
+        return None
 
-    encodings_list = []
-    ids_list       = []
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(MODELO_LBPH)
+    print(f"[INFO] Modelo LBPH cargado desde: {MODELO_LBPH}")
+    return recognizer
 
-    for id_usuario, encoding_str in datos:
-        try:
-            vector = np.array(json.loads(encoding_str))
-            encodings_list.append(vector)
-            ids_list.append(id_usuario)
-        except Exception as e:
-            print(f"[AVISO] Encoding inválido para ID {id_usuario}: {e}")
 
-    print(f"[INFO] {len(encodings_list)} encoding(s) cargados desde BD.")
-    return encodings_list, ids_list
+# ─── Compatibilidad: función que antes cargaba encodings en RAM ───────────────
+def cargar_encodings_bd():
+    """
+    Mantiene la firma original para compatibilidad.
+    Con LBPH, los 'encodings' son el modelo ya entrenado, no vectores en RAM.
+    Retorna (recognizer, ids_list) donde ids_list viene de la BD.
+    """
+    recognizer = cargar_modelo_lbph()
+    datos      = obtener_todos_encodings()
+    ids_list   = [id_u for id_u, _ in datos]
+    return recognizer, ids_list
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    sin_encoding = verificar_encodings()
+    solo_verificar = "--check" in sys.argv
 
-    if sin_encoding:
-        respuesta = input("\n¿Deseas regenerar encodings desde fotos guardadas? (s/n): ").strip().lower()
-        if respuesta == "s":
-            for id_u, nombre in sin_encoding:
-                print(f"\n[INFO] Regenerando para: {nombre}")
-                regenerar_encoding(id_u)
+    sin_imagenes = verificar_encodings()
+
+    if solo_verificar:
+        sys.exit(0)
+
+    if sin_imagenes:
+        print("\n[AVISO] Hay usuarios sin imágenes. Solo se entrenarán los que sí tienen.")
+
+    respuesta = input("\n¿Deseas entrenar/re-entrenar el modelo LBPH ahora? (s/n): ").strip().lower()
+    if respuesta == "s":
+        ok = entrenar()
+        if ok:
+            print("\n[LISTO] El modelo está listo. Puedes correr ReconocimientoFacial.py")
+        else:
+            print("\n[ERROR] No se pudo entrenar. Revisa los mensajes anteriores.")
     else:
-        print("\n[OK] Todos los usuarios tienen encoding. Sistema listo.")
+        print("[INFO] Entrenamiento omitido.")

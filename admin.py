@@ -1,23 +1,21 @@
 """
-setup_admin.py — Inicialización del primer administrador del sistema.
+admin.py — Inicialización del primer administrador del sistema.
 
 Solo se necesita correr UNA vez, cuando la BD está vacía.
 Si ya existe un admin, el script lo detecta y no hace nada.
-
-Uso:
-    python setup_admin.py
 """
 
 import cv2
-import json
+import os
 import sys
 import numpy as np
-import face_recognition
 from db_manager import (
     get_connection,
     guardar_encoding,
+    DATA_DIR,
     ROL_ADMIN,
 )
+from entrenadoRF import entrenar, FACE_SIZE
 
 try:
     from picamera2 import Picamera2
@@ -25,9 +23,12 @@ try:
 except ImportError:
     PICAMERA2_DISPONIBLE = False
 
-MODELO_YUNET  = "face_detection_yunet_2023mar.onnx"
-ESCALA_DETEC  = 0.25
-FOTOS_OBJETIVO = 10
+# ─── Parámetros ───────────────────────────────────────────────────────────────
+HAAR_CASCADE   = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+FOTOS_OBJETIVO = 30       # más fotos = modelo más robusto
+ESCALA_DETEC   = 0.5      # factor de reducción para detección más rápida
+MIN_VECINOS    = 5
+MIN_TAMANO     = (60, 60)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -55,54 +56,43 @@ def matricula_existe(matricula: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  DETECTOR
+#  DETECTOR HAAR CASCADE
 # ══════════════════════════════════════════════════════════════════════════════
 
 def crear_detector():
-    try:
-        det = cv2.FaceDetectorYN.create(
-            MODELO_YUNET, "",
-            (int(640 * ESCALA_DETEC), int(480 * ESCALA_DETEC)),
-            score_threshold=0.80,
-            nms_threshold=0.3,
-            top_k=1
-        )
-        print("[INFO] Detector: YuNet")
-        return det
-    except Exception:
-        print("[INFO] Detector: HOG (YuNet no disponible)")
+    """
+    Crea el detector de rostros con Haar Cascade.
+    Es un método clásico, sin IA ni redes neuronales.
+    """
+    detector = cv2.CascadeClassifier(HAAR_CASCADE)
+    if detector.empty():
+        raise RuntimeError(f"No se pudo cargar Haar Cascade: {HAAR_CASCADE}")
+    print(f"[INFO] Detector: Haar Cascade (sin IA)")
+    return detector
+
+
+def detectar_rostro(detector, gray_small):
+    """
+    Detecta el rostro principal en una imagen en escala de grises.
+    Retorna (x, y, w, h) del rostro más grande, o None si no hay detección.
+
+    scaleFactor=1.1  → busca rostros a múltiples escalas
+    minNeighbors=5   → cantidad de detecciones vecinas requeridas
+    minSize          → descarta objetos pequeños
+    """
+    rostros = detector.detectMultiScale(
+        gray_small,
+        scaleFactor=1.1,
+        minNeighbors=MIN_VECINOS,
+        minSize=MIN_TAMANO
+    )
+    if len(rostros) == 0:
         return None
-
-
-def detectar(detector, small_bgr, small_rgb):
-    if detector:
-        h, w = small_bgr.shape[:2]
-        detector.setInputSize((w, h))
-        _, faces = detector.detect(small_bgr)
-        if faces is None:
-            return []
-        f = faces[0]
-        if float(f[14]) < 0.80:
-            return []
-        if len(f) >= 14:
-            ojo_der_x = float(f[4])
-            ojo_izq_x = float(f[6])
-            nariz_x   = float(f[8])
-            x_min = min(ojo_der_x, ojo_izq_x)
-            x_max = max(ojo_der_x, ojo_izq_x)
-            margen = (x_max - x_min) * 0.25
-            if not (x_min - margen < nariz_x < x_max + margen):
-                return []
-            if abs(ojo_izq_x - ojo_der_x) < 8:
-                return []
-        return [(int(f[1]), int(f[0]+f[2]), int(f[1]+f[3]), int(f[0]))]
-    else:
-        return face_recognition.face_locations(
-            small_rgb, model="hog", number_of_times_to_upsample=0)
+    return max(rostros, key=lambda r: r[2] * r[3])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CAPTURA DE DATOS
+#  CAPTURA DE DATOS DEL ADMINISTRADOR
 # ══════════════════════════════════════════════════════════════════════════════
 
 def pedir_datos() -> dict:
@@ -155,11 +145,15 @@ def pedir_datos() -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CAPTURA DE ROSTRO
+#  CAPTURA DE IMÁGENES DEL ROSTRO
 # ══════════════════════════════════════════════════════════════════════════════
 
-def capturar_encoding(nombre_completo: str) -> list | None:
-    """Abre la cámara y captura FOTOS_OBJETIVO encodings del admin."""
+def capturar_rostro(id_usuario: int, nombre_completo: str) -> str | None:
+    """
+    Abre la cámara y captura FOTOS_OBJETIVO imágenes del rostro en escala de grises.
+    Las guarda en DATA_DIR/<id>_<nombre>/.
+    Retorna la ruta de la carpeta, o None si se canceló.
+    """
     print(f"\n[INFO] Capturando rostro de: {nombre_completo}")
     print(f"[INFO] Se necesitan {FOTOS_OBJETIVO} capturas.")
     print("[INFO] Mira de frente a la cámara.")
@@ -167,8 +161,14 @@ def capturar_encoding(nombre_completo: str) -> list | None:
 
     detector = crear_detector()
 
+    # Crear carpeta para este usuario
+    nombre_carpeta = nombre_completo.replace(" ", "_")
+    carpeta = os.path.join(DATA_DIR, f"{id_usuario}_{nombre_carpeta}")
+    os.makedirs(carpeta, exist_ok=True)
+
+    # Inicializar cámara (soporte para picamera2 en Raspberry Pi)
     if PICAMERA2_DISPONIBLE:
-        picam = Picamera2()
+        picam  = Picamera2()
         config = picam.create_preview_configuration(
             main={"size": (640, 480), "format": "RGB888"})
         picam.configure(config)
@@ -177,7 +177,7 @@ def capturar_encoding(nombre_completo: str) -> list | None:
         print("[CAMARA] Usando picamera2 (CSI)")
     else:
         picam = None
-        cap = cv2.VideoCapture(0)
+        cap   = cv2.VideoCapture(0)
         if not cap.isOpened():
             print("[ERROR] No se pudo abrir la cámara.")
             return None
@@ -185,50 +185,56 @@ def capturar_encoding(nombre_completo: str) -> list | None:
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         print("[CAMARA] Usando OpenCV (USB/webcam)")
 
-    encodings = []
+    capturadas = 0
 
-    while True:
+    while capturadas < FOTOS_OBJETIVO:
+        # Leer frame
         if picam:
             frame = picam.capture_array()
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            frame = cv2.flip(frame, 1)
         else:
             ret, frame = cap.read()
             if not ret:
                 continue
-            frame = cv2.flip(frame, 1)
-        small_bgr = cv2.resize(frame, (0, 0),
-                                fx=ESCALA_DETEC, fy=ESCALA_DETEC)
-        small_rgb = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB)
-        ubs       = detectar(detector, small_bgr, small_rgb)
 
-        for (top, right, bottom, left) in ubs:
+        frame = cv2.flip(frame, 1)
+
+        # Convertir a escala de grises para la detección
+        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
+
+        rostro_coords = detectar_rostro(detector, small)
+
+        if rostro_coords is not None:
             esc = int(1 / ESCALA_DETEC)
-            cv2.rectangle(frame,
-                          (left*esc, top*esc),
-                          (right*esc, bottom*esc),
-                          (0, 212, 170), 2)
+            x, y, w, h = rostro_coords
+            x, y, w, h = x*esc, y*esc, w*esc, h*esc
 
-            encs = face_recognition.face_encodings(
-                small_rgb, [(top, right, bottom, left)],
-                num_jitters=0, model="small")
-            if encs:
-                encodings.append(encs[0])
+            # Recortar y normalizar el rostro
+            rostro_crop = gray[y:y+h, x:x+w]
+            rostro_res  = cv2.resize(rostro_crop, FACE_SIZE)
 
-        # Progreso
-        actual = len(encodings)
-        bw     = int((actual / FOTOS_OBJETIVO) * 300)
-        h_f    = frame.shape[0]
-        cv2.rectangle(frame, (10, h_f-30), (310, h_f-10), (40, 40, 40), -1)
-        cv2.rectangle(frame, (10, h_f-30), (10+bw, h_f-10), (0, 212, 170), -1)
-        cv2.putText(frame, f"{actual}/{FOTOS_OBJETIVO} capturas",
-                    (10, h_f-35),
+            # Guardar imagen
+            ruta_img = os.path.join(carpeta, f"rostro_{capturadas:03d}.jpg")
+            cv2.imwrite(ruta_img, rostro_res)
+            capturadas += 1
+
+            # Dibujar rectángulo en la vista previa
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 212, 170), 2)
+
+        # Barra de progreso
+        bw = int((capturadas / FOTOS_OBJETIVO) * 300)
+        hf = frame.shape[0]
+        cv2.rectangle(frame, (10, hf-30), (310, hf-10), (40, 40, 40), -1)
+        cv2.rectangle(frame, (10, hf-30), (10+bw, hf-10), (0, 212, 170), -1)
+        cv2.putText(frame, f"{capturadas}/{FOTOS_OBJETIVO} capturas",
+                    (10, hf-35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
         cv2.putText(frame, f"Admin: {nombre_completo}",
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 212, 170), 2)
 
-        if actual >= FOTOS_OBJETIVO:
+        if capturadas >= FOTOS_OBJETIVO:
             cv2.putText(frame, "Listo!",
                         (frame.shape[1]//2 - 50, frame.shape[0]//2),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 212, 170), 3)
@@ -238,32 +244,28 @@ def capturar_encoding(nombre_completo: str) -> list | None:
 
         if key == 27:
             print("\n[CANCELADO] Setup cancelado por el usuario.")
-            cap.release()
+            if picam: picam.stop()
+            if cap:   cap.release()
             cv2.destroyAllWindows()
             return None
 
-        if actual >= FOTOS_OBJETIVO:
-            break
-
-    if picam:
-        picam.stop()
-    if cap:
-        cap.release()
+    if picam: picam.stop()
+    if cap:   cap.release()
     cv2.destroyAllWindows()
 
-    if not encodings:
-        print("[ERROR] No se capturó ningún encoding.")
-        return None
-
-    return encodings
+    print(f"[OK] {capturadas} imágenes guardadas en: {carpeta}")
+    return carpeta
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  GUARDAR EN BD
 # ══════════════════════════════════════════════════════════════════════════════
 
-def crear_admin(datos: dict, encodings: list) -> int:
-    """Inserta el admin en la BD y guarda su encoding."""
+def crear_admin(datos: dict, carpeta_rostros: str) -> int:
+    """
+    Inserta el admin en la BD y guarda la ruta de sus imágenes.
+    Luego entrena el modelo LBPH.
+    """
     with get_connection() as conn:
         cursor = conn.execute(
             "INSERT INTO usuarios "
@@ -280,8 +282,12 @@ def crear_admin(datos: dict, encodings: list) -> int:
         )
         id_usuario = cursor.lastrowid
 
-    enc_promedio = np.mean(encodings, axis=0)
-    guardar_encoding(id_usuario, json.dumps(enc_promedio.tolist()))
+    # Guardar ruta de carpeta en datos_biometricos (campo "encoding" reutilizado)
+    guardar_encoding(id_usuario, carpeta_rostros)
+
+    # Entrenar modelo LBPH con el primer administrador
+    print("[INFO] Entrenando modelo LBPH inicial...")
+    entrenar()
 
     return id_usuario
 
@@ -292,10 +298,9 @@ def crear_admin(datos: dict, encodings: list) -> int:
 
 def main():
     print("\n" + "="*50)
-    print("  FACEACCESS — SETUP INICIAL")
+    print("  FACEACCESS — SETUP INICIAL (sin IA)")
     print("="*50)
 
-    # Verificar si ya hay admin
     if ya_existe_admin():
         print("\n[OK] Ya existe un administrador en la BD.")
         print("[INFO] No es necesario correr este script de nuevo.")
@@ -307,10 +312,9 @@ def main():
 
     # Pedir datos
     datos = pedir_datos()
-
     nombre_completo = f"{datos['nombre']} {datos['apellido_p']}"
 
-    # Confirmar
+    # Confirmar datos
     print("\n" + "="*50)
     print("  CONFIRMAR DATOS")
     print("="*50)
@@ -324,27 +328,40 @@ def main():
         print("[CANCELADO] Vuelve a correr el script para intentarlo de nuevo.")
         sys.exit(0)
 
+    # Insertar en BD primero para obtener id_usuario
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO usuarios "
+            "(nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (datos["nombre"], datos["apellido_p"], datos["apellido_m"],
+             datos["matricula"], datos["contrasenia"], ROL_ADMIN)
+        )
+        id_u = cursor.lastrowid
+
     # Capturar rostro
-    encodings = capturar_encoding(nombre_completo)
-    if encodings is None:
+    carpeta = capturar_rostro(id_u, nombre_completo)
+    if carpeta is None:
         print("[ERROR] No se pudo capturar el rostro. Intenta de nuevo.")
+        # Revertir inserción
+        with get_connection() as conn:
+            conn.execute("DELETE FROM usuarios WHERE id_usuario = ?", (id_u,))
         sys.exit(1)
 
-    # Guardar en BD
-    try:
-        id_u = crear_admin(datos, encodings)
-        print("\n" + "="*50)
-        print("  ✓ ADMINISTRADOR CREADO EXITOSAMENTE")
-        print("="*50)
-        print(f"  Nombre    : {nombre_completo}")
-        print(f"  Matrícula : {datos['matricula']}")
-        print(f"  ID        : {id_u}")
-        print(f"  Encodings : {len(encodings)} capturas")
-        print("="*50)
-        print("\n[LISTO] Ahora puedes correr ReconocimientoFacial.py")
-    except Exception as e:
-        print(f"\n[ERROR] No se pudo guardar en la BD: {e}")
-        sys.exit(1)
+    # Guardar ruta y entrenar
+    guardar_encoding(id_u, carpeta)
+    print("[INFO] Entrenando modelo LBPH...")
+    entrenar()
+
+    print("\n" + "="*50)
+    print("  ✓ ADMINISTRADOR CREADO EXITOSAMENTE")
+    print("="*50)
+    print(f"  Nombre    : {nombre_completo}")
+    print(f"  Matrícula : {datos['matricula']}")
+    print(f"  ID        : {id_u}")
+    print(f"  Imágenes  : {carpeta}")
+    print("="*50)
+    print("\n[LISTO] Ahora puedes correr ReconocimientoFacial.py")
 
 
 if __name__ == "__main__":

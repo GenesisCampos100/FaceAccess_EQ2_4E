@@ -1,6 +1,7 @@
 """
 db_manager.py — Módulo central de conexión a la BD para el sistema FaceAccess.
 Todas las operaciones con la base de datos pasan por aquí.
+
 """
 
 import sqlite3
@@ -16,13 +17,17 @@ ROL_PERSONAL_AUTORIZADO = 2
 ROL_PERSONAL_ESCOLAR    = 3
 ROL_ALUMNO              = 4
 
+# ─── Carpeta raíz donde se guardan las imágenes de rostros por usuario ────────
+# Cada usuario tiene su subcarpeta: DATA_DIR/<id_usuario>_<nombre>/
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_rostros")
+
 
 def get_connection():
     """Retorna una conexión a la BD con foreign keys activas y timeout."""
-    conn = sqlite3.connect(DB_PATH, timeout=10)   # espera hasta 10s si está bloqueada
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")      # permite lecturas simultáneas
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -34,8 +39,6 @@ def login(matricula: str, contrasenia: str):
     """
     Valida credenciales (matrícula + contraseña).
     Retorna la fila del usuario si es válido y está activo, o None.
-    El reconocimiento facial se valida por separado en ReconocimientoFacial.py
-    antes de llamar a esta función.
     """
     with get_connection() as conn:
         usuario = conn.execute(
@@ -82,7 +85,6 @@ def nombre_rol(id_rol: int) -> str:
 def obtener_personas():
     """
     Retorna lista de (id_usuario, nombre_completo) para todos los usuarios activos.
-    Usado por entrenadoRF para mapear label → nombre.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -113,10 +115,7 @@ def obtener_usuario_por_matricula(matricula: str):
 
 
 def obtener_personal_autorizado() -> list:
-    """
-    Retorna lista de todos los usuarios activos con rol PERSONAL_AUTORIZADO.
-    Usado para enviar notificaciones de acceso manual.
-    """
+    """Retorna lista de todos los usuarios activos con rol PERSONAL_AUTORIZADO."""
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM usuarios WHERE id_rol = ? AND estatus = 1",
@@ -130,8 +129,6 @@ def registrar_usuario(nombre: str, apellido_p: str, matricula: str,
                       apellido_m: str = "") -> int:
     """
     Inserta un usuario nuevo. Retorna su id_usuario.
-    La validación de qué rol puede asignarse debe hacerse ANTES
-    con roles_asignables().
     """
     with get_connection() as conn:
         cursor = conn.execute(
@@ -143,7 +140,7 @@ def registrar_usuario(nombre: str, apellido_p: str, matricula: str,
 
 
 def desactivar_usuario(id_usuario: int):
-    """Desactiva un usuario (baja lógica). Solo ADMIN debería llamar esto."""
+    """Desactiva un usuario (baja lógica)."""
     with get_connection() as conn:
         conn.execute(
             "UPDATE usuarios SET estatus = 0 WHERE id_usuario = ?",
@@ -153,11 +150,15 @@ def desactivar_usuario(id_usuario: int):
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  DATOS BIOMÉTRICOS
+#  Con LBPH ya NO se guardan vectores de 128 dimensiones.
+#  En su lugar, se guarda la ruta de la carpeta de imágenes del usuario.
+#  El campo "encoding" de la tabla se reutiliza para almacenar esa ruta.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def guardar_encoding(id_usuario: int, encoding_str: str):
+def guardar_encoding(id_usuario: int, ruta_o_datos: str):
     """
     Guarda o actualiza la ruta de carpeta de imágenes del usuario.
+    Parámetro reutilizado: antes era el vector JSON, ahora es la ruta en disco.
     Usa UPSERT para no duplicar registros.
     """
     conn = None
@@ -168,13 +169,12 @@ def guardar_encoding(id_usuario: int, encoding_str: str):
             "VALUES (?, ?, CURRENT_TIMESTAMP) "
             "ON CONFLICT(id_usuario) DO UPDATE SET "
             "encoding=excluded.encoding, fecha_actualizacion=CURRENT_TIMESTAMP",
-            (id_usuario, encoding_str)
+            (id_usuario, ruta_o_datos)
         )
         conn.commit()
-        print(f"[BD] Encoding guardado correctamente para id_usuario {id_usuario}")
+        print(f"[BD] Ruta biométrica guardada para id_usuario {id_usuario}")
     except sqlite3.OperationalError as e:
-        print(f"[ERROR BD] No se pudo guardar el encoding: {e}")
-        print("[AVISO] Asegurate de que DB Browser u otra app no tenga la BD abierta.")
+        print(f"[ERROR BD] No se pudo guardar: {e}")
         if conn:
             conn.rollback()
     finally:
@@ -183,7 +183,7 @@ def guardar_encoding(id_usuario: int, encoding_str: str):
 
 
 def obtener_encoding(id_usuario: int) -> str | None:
-    """Retorna el encoding almacenado del usuario, o None si no existe."""
+    """Retorna la ruta almacenada del usuario, o None si no existe."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT encoding FROM datos_biometricos WHERE id_usuario = ?",
@@ -194,8 +194,9 @@ def obtener_encoding(id_usuario: int) -> str | None:
 
 def obtener_todos_encodings():
     """
-    Retorna lista de (id_usuario, encoding) de todos los usuarios activos
+    Retorna lista de (id_usuario, ruta) de todos los usuarios activos
     que tienen datos biométricos registrados.
+    Mantiene la firma original para compatibilidad.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -212,6 +213,22 @@ def tiene_biometrico(id_usuario: int) -> bool:
     return obtener_encoding(id_usuario) is not None
 
 
+def obtener_carpeta_usuario(id_usuario: int) -> str:
+    """
+    Retorna la ruta de la carpeta de imágenes del usuario.
+    Si no existe en BD, la construye a partir del nombre.
+    """
+    ruta = obtener_encoding(id_usuario)
+    if ruta:
+        return ruta
+    # Construir ruta por defecto
+    u = obtener_usuario_por_id(id_usuario)
+    if u:
+        nombre = f"{u['nombre']}_{u['apellido_p']}"
+        return os.path.join(DATA_DIR, f"{id_usuario}_{nombre}")
+    return os.path.join(DATA_DIR, str(id_usuario))
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  ACCESOS  (entrada / salida)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -219,8 +236,7 @@ def tiene_biometrico(id_usuario: int) -> bool:
 def registrar_entrada(id_usuario: int, metodo: str = "facial") -> int:
     """
     Registra una entrada.
-    Si ya hay un acceso abierto hoy para este usuario, retorna ese id_acceso
-    sin duplicar el registro.
+    Si ya hay un acceso abierto hoy para este usuario, retorna ese id_acceso.
     """
     hoy        = date.today().isoformat()
     hora_ahora = datetime.now().strftime("%H:%M:%S")
