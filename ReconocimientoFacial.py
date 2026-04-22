@@ -939,12 +939,23 @@ class FaceAccess(ctk.CTk):
             ("Contraseña", "contrasenia")
         ]
         
+        self._grado_frame = None
+        self._grupo_frame = None
+        
         for i, (lbl, key) in enumerate(campos):
             row = i // 2  
             col = i % 2   
             
             f = ctk.CTkFrame(form_grid, fg_color="transparent")
             f.grid(row=row, column=col, padx=25, pady=4, sticky="w")
+            
+            # Guardar referencias a los frames de grado y grupo para mostrar/ocultar
+            if key == "grado":
+                self._grado_frame = f
+                f.grid_remove()  # Ocultar inicialmente
+            elif key == "grupo":
+                self._grupo_frame = f
+                f.grid_remove()  # Ocultar inicialmente
             
             ctk.CTkLabel(f, text=lbl, font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
             e = ctk.CTkEntry(f, width=140, height=32, font=("Helvetica", 12), show="*" if key=="contrasenia" else "")
@@ -956,7 +967,9 @@ class FaceAccess(ctk.CTk):
         rol_frame = ctk.CTkFrame(form_grid, fg_color="transparent")
         rol_frame.grid(row=3, column=1, padx=12, pady=2, sticky="w")
         ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
-        self.combo_rol = ctk.CTkComboBox(rol_frame, width=140, height=32, font=("Helvetica", 12), values=["ALUMNO","PERSONAL_ESCOLAR"])
+        self.combo_rol = ctk.CTkComboBox(rol_frame, width=140, height=32, font=("Helvetica", 12), 
+                                          values=["ALUMNO","PERSONAL_ESCOLAR"],
+                                          command=self._actualizar_campos_rol)
         self.combo_rol.pack()
         self.combo_rol.set("ALUMNO")
         # --- FIN DEL DISEÑO ---
@@ -977,7 +990,9 @@ class FaceAccess(ctk.CTk):
         mapa = {1:"ADMIN",2:"PERSONAL_AUTORIZADO",3:"PERSONAL_ESCOLAR",4:"ALUMNO"}
         opciones = [mapa[r] for r in roles_asignables(operador["id_rol"]) if r in mapa]
         self.combo_rol.configure(values=opciones)
-        self.combo_rol.set(opciones[-1] if opciones else "ALUMNO")
+        rol_inicial = opciones[-1] if opciones else "ALUMNO"
+        self.combo_rol.set(rol_inicial)
+        self._actualizar_campos_rol(rol_inicial)
         self.lbl_reg_op.configure(
             text=f"Operador: {operador['nombre']} {operador['apellido_p']} ({operador['nombre_rol']})")
         for e in self._entries.values(): e.delete(0, "end")
@@ -985,12 +1000,34 @@ class FaceAccess(ctk.CTk):
         self._ocultar_overlays()
         self.ov_registro.place(relx=0, rely=0, relwidth=1, relheight=1)
 
+    def _actualizar_campos_rol(self, rol_seleccionado):
+        """Muestra/oculta los campos de grado y grupo según el rol seleccionado."""
+        if rol_seleccionado == "ALUMNO":
+            if self._grado_frame:
+                self._grado_frame.grid()
+            if self._grupo_frame:
+                self._grupo_frame.grid()
+        else:
+            if self._grado_frame:
+                self._grado_frame.grid_remove()
+            if self._grupo_frame:
+                self._grupo_frame.grid_remove()
+
     def _reg_continuar(self):
         datos = {k: e.get().strip() for k, e in self._entries.items()}
         mapa  = {"ADMIN":1,"PERSONAL_AUTORIZADO":2,"PERSONAL_ESCOLAR":3,"ALUMNO":4}
+        rol_seleccionado = self.combo_rol.get()
+        
         if not all([datos["nombre"], datos["apellido_p"], datos["matricula"], datos["contrasenia"]]):
             self.lbl_reg_err.configure(text="Nombre, apellido, matrícula y contraseña son obligatorios.")
             return
+        
+        # Si es alumno, validar que grado y grupo también estén llenos
+        if rol_seleccionado == "ALUMNO":
+            if not all([datos["grado"], datos["grupo"]]):
+                self.lbl_reg_err.configure(text="Grado y grupo son obligatorios para alumnos.")
+                return
+        
         if obtener_usuario_por_matricula(datos["matricula"]):
             self.lbl_reg_err.configure(text=f"La matrícula '{datos['matricula']}' ya existe.")
             return
