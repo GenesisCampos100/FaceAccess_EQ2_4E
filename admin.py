@@ -301,11 +301,11 @@ def main():
     print("  FACEACCESS — SETUP INICIAL (sin IA)")
     print("="*50)
 
-    if ya_existe_admin():
-        print("\n[OK] Ya existe un administrador en la BD.")
-        print("[INFO] No es necesario correr este script de nuevo.")
-        print("[INFO] Usa ReconocimientoFacial.py directamente.")
-        sys.exit(0)
+    # if ya_existe_admin():
+    #     print("\n[OK] Ya existe un administrador en la BD.")
+    #     print("[INFO] No es necesario correr este script de nuevo.")
+    #     print("[INFO] Usa ReconocimientoFacial.py directamente.")
+    #     sys.exit(0)
 
     print("\n[INFO] No se encontró ningún administrador.")
     print("[INFO] Vamos a crear el primer administrador del sistema.\n")

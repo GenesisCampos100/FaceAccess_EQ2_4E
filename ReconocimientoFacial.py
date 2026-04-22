@@ -5,6 +5,12 @@ ReconocimientoFacial.py — Sistema de control de acceso por reconocimiento faci
 
 import cv2
 import os
+
+# --- INICIO DEL PARCHE PARA TKINTER (PYTHON 3.13) ---
+os.environ['TCL_LIBRARY'] = r'C:\Users\karol\AppData\Local\Programs\Python\Python313\tcl\tcl8.6'
+os.environ['TK_LIBRARY'] = r'C:\Users\karol\AppData\Local\Programs\Python\Python313\tcl\tk8.6'
+# --- FIN DEL PARCHE ---
+
 import threading
 import time
 import numpy as np
@@ -131,7 +137,7 @@ class FaceAccess(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         self.title("FaceAccess")
-        self.geometry("480x800")
+        self.geometry("440x600")
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
 
@@ -170,14 +176,14 @@ class FaceAccess(ctk.CTk):
 
         # ── Dimensiones de teclado adaptadas a pantalla táctil de 7" ──────────
         # Se calculan una vez al iniciar para que ambos teclados las compartan.
-        _APP_W         = 480          # ancho fijo de la ventana
+        _APP_W         = 420         # ancho fijo de la ventana
         _COLS_MAX      = 11           # columnas máximas (fila de números)
         _KB_PAD        = 4            # padding entre botones
         self._KB_BW    = (_APP_W - _KB_PAD * (_COLS_MAX + 1)) // _COLS_MAX  # ≈ 39px
         self._KB_BH    = 52           # altura generosa para dedos en 7"
         self._KB_FS    = 16           # fuente más legible en pantalla pequeña
         self._KB_PAD   = _KB_PAD
-        self._KB_ACT_H = 50           # altura botones de acción (Espacio, OK, etc.)
+        self._KB_ACT_H = 100           # altura botones de acción (Espacio, OK, etc.)
         self._KB_SPC_W = _APP_W - 160 # ancho botón Espacio, dejando hueco para Listo
 
         self._build_header()
@@ -687,17 +693,17 @@ class FaceAccess(ctk.CTk):
         self.lbl_np.pack(pady=(10, 8), padx=16)
 
         self._np_kb_frame = ctk.CTkFrame(self.ov_numpad, fg_color="transparent")
-        self._np_kb_frame.pack(padx=8, fill="x")
+        self._np_kb_frame.pack(padx=8, fill="x", pady=(20, 10))
         self._np_botones = {}
         self._np_renderizar_teclado()
 
         # Botones de acción más grandes
         fa = ctk.CTkFrame(self.ov_numpad, fg_color="transparent")
-        fa.pack(pady=(8, 10))
+        fa.pack(pady=(30, 20))
 
         ctk.CTkButton(
             fa, text="Cancelar",
-            width=130, height=self._KB_ACT_H,
+            width=130, height=70,
             fg_color="transparent", text_color=C_TXT2,
             hover_color=C_FRAME,
             font=("Helvetica", 13),
@@ -706,7 +712,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkButton(
             fa, text="OK  ✓",
-            width=180, height=self._KB_ACT_H,
+            width=130, height=70,
             fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A",
             font=("Helvetica", 15, "bold"),
@@ -725,9 +731,9 @@ class FaceAccess(ctk.CTk):
         FS  = self._KB_FS
 
         filas = [
-            ["1","2","3","4","5","6","7","8","9","0","⌫"],
+            ["1","2","3","4","5","6","7","8","9","0"],
             ["Q","W","E","R","T","Y","U","I","O","P"],
-            ["A","S","D","F","G","H","J","K","L"],
+            ["A","S","D","F","G","H","J","K","L", "⌫"],
             ["⇧","Z","X","C","V","B","N","M","-"],
         ]
 
@@ -915,39 +921,55 @@ class FaceAccess(ctk.CTk):
     def _build_ov_registro(self):
         self.ov_registro = ctk.CTkFrame(self.frame_video, fg_color="#0F1923", corner_radius=0)
         ctk.CTkLabel(self.ov_registro, text="Registrar nuevo usuario",
-                     font=("Helvetica", 15, "bold"), text_color=C_TXT).pack(pady=(24, 2))
+                     font=("Helvetica", 15, "bold"), text_color=C_TXT).pack(pady=(15, 2))
         self.lbl_reg_op = ctk.CTkLabel(self.ov_registro, text="",
                                         font=("Helvetica", 10), text_color=C_OK)
-        self.lbl_reg_op.pack(pady=(0, 12))
+        self.lbl_reg_op.pack(pady=(0, 10))
+        
         self._entries = {}
-        for lbl, key in [("Nombre(s)","nombre"),("Apellido paterno","apellido_p"),
-                         ("Apellido materno","apellido_m"),("Matrícula","matricula"),
-                         ("Contraseña","contrasenia")]:
-            ctk.CTkLabel(self.ov_registro, text=lbl, font=("Helvetica", 10),
-                          text_color=C_TXT2, anchor="w").pack(anchor="w", padx=28)
-            e = ctk.CTkEntry(self.ov_registro, width=320, height=38,
-                              font=("Helvetica", 12),
-                              show="*" if key=="contrasenia" else "")
-            e.pack(pady=(0, 4), padx=28)
+        
+        # --- NUEVO DISEÑO EN 2 COLUMNAS ---
+        form_grid = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
+        form_grid.pack(pady=5)
+        
+        campos = [
+            ("Nombre(s)", "nombre"), ("Apellido paterno", "apellido_p"),
+            ("Apellido materno", "apellido_m"), ("Matrícula", "matricula"),
+            ("Grado", "grado"), ("Grupo", "grupo"), # <--- CAMPOS AGREGADOS
+            ("Contraseña", "contrasenia")
+        ]
+        
+        for i, (lbl, key) in enumerate(campos):
+            row = i // 2  
+            col = i % 2   
+            
+            f = ctk.CTkFrame(form_grid, fg_color="transparent")
+            f.grid(row=row, column=col, padx=25, pady=4, sticky="w")
+            
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
+            e = ctk.CTkEntry(f, width=140, height=32, font=("Helvetica", 12), show="*" if key=="contrasenia" else "")
+            e.pack()
             e.bind("<FocusIn>", lambda ev, entry=e: self._abrir_teclado(entry))
             self._entries[key] = e
-        ctk.CTkLabel(self.ov_registro, text="Rol", font=("Helvetica", 10),
-                      text_color=C_TXT2, anchor="w").pack(anchor="w", padx=28)
-        self.combo_rol = ctk.CTkComboBox(self.ov_registro, width=320, height=38,
-                                          font=("Helvetica", 12),
-                                          values=["ALUMNO","PERSONAL_ESCOLAR"])
-        self.combo_rol.pack(pady=(0, 4), padx=28); self.combo_rol.set("ALUMNO")
-        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="",
-                                         font=("Helvetica", 10), text_color=C_ERROR)
+            
+        # El Selector de Rol toma el hueco vacío en la cuadrícula
+        rol_frame = ctk.CTkFrame(form_grid, fg_color="transparent")
+        rol_frame.grid(row=3, column=1, padx=12, pady=2, sticky="w")
+        ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
+        self.combo_rol = ctk.CTkComboBox(rol_frame, width=140, height=32, font=("Helvetica", 12), values=["ALUMNO","PERSONAL_ESCOLAR"])
+        self.combo_rol.pack()
+        self.combo_rol.set("ALUMNO")
+        # --- FIN DEL DISEÑO ---
+
+        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="", font=("Helvetica", 10), text_color=C_ERROR)
         self.lbl_reg_err.pack(pady=2)
+        
         fb = ctk.CTkFrame(self.ov_registro, fg_color="transparent"); fb.pack(pady=10)
         ctk.CTkButton(fb, text="Continuar →", width=150, height=40, fg_color=C_OK,
-                       text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", 13, "bold"),
+                       text_color=C_BG, hover_color="#00A88A", font=("Helvetica", 13, "bold"),
                        command=self._reg_continuar).pack(side="left", padx=6)
-        ctk.CTkButton(fb, text="Cancelar", width=100, height=40,
-                       fg_color="transparent", text_color=C_TXT2,
-                       hover_color=C_FRAME, font=("Helvetica", 12),
+        ctk.CTkButton(fb, text="Cancelar", width=100, height=40, fg_color="transparent", 
+                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 12),
                        command=self._cancelar_modo).pack(side="left", padx=6)
 
     def _abrir_registro(self, operador):
@@ -1175,7 +1197,7 @@ class FaceAccess(ctk.CTk):
             w.destroy()
         self._kb_renderizar()
         # Ocupa el 65% inferior de la pantalla 
-        self._ov_teclado.place(relx=0, rely=0.35, relwidth=1, relheight=0.65)
+        self._ov_teclado.place(relx=0, rely=0.46, relwidth=1, relheight=0.54)
         self._ov_teclado.lift()
 
     def _kb_renderizar(self):
@@ -1188,9 +1210,9 @@ class FaceAccess(ctk.CTk):
         FS  = self._KB_FS
 
         filas = [
-            ["1","2","3","4","5","6","7","8","9","0","⌫"],
+            ["1","2","3","4","5","6","7","8","9","0"],
             ["Q","W","E","R","T","Y","U","I","O","P"],
-            ["A","S","D","F","G","H","J","K","L"],
+            ["A","S","D","F","G","H","J","K","L","⌫"],
             ["⇧","Z","X","C","V","B","N","M","-","_"],
         ]
 
@@ -1238,7 +1260,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkButton(
             fb, text="Espacio",
-            width=self._KB_SPC_W, height=self._KB_ACT_H,
+            width=self._KB_SPC_W, height=70,
             font=("Helvetica", FS),
             fg_color=C_FRAME, text_color=C_TXT,
             hover_color=C_BORDE,
@@ -1249,7 +1271,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkButton(
             fb, text="Listo ✓",
-            width=140, height=self._KB_ACT_H,
+            width=140, height=70,
             font=("Helvetica", FS, "bold"),
             fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A",
