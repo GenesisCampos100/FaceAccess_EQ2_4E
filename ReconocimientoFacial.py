@@ -131,7 +131,7 @@ class FaceAccess(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         self.title("FaceAccess")
-        self.geometry("480x800")
+        self.geometry("380x700")
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
 
@@ -504,6 +504,13 @@ class FaceAccess(ctk.CTk):
 
         if id_usuario is not None:
             u      = obtener_usuario_por_id(id_usuario)
+
+            if not u:
+                print(f"[ERROR] ID reconocido no existe en BD: {id_usuario}")
+                id_usuario = None
+
+        if id_usuario is not None:
+            
             nombre = f"{u['nombre']} {u['apellido_p']}" if u else f"ID {id_usuario}"
             mat    = u["matricula"]  if u else ""
             rol    = u["nombre_rol"] if u else ""
@@ -602,7 +609,19 @@ class FaceAccess(ctk.CTk):
         self.lbl_badge.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
         self.lbl_inst = ctk.CTkLabel(self.frame_video, text="", font=("Helvetica", 14, "bold"), text_color=C_OK, fg_color="#0D1E2D", corner_radius=20, padx=20, pady=8)
         self.lbl_inst.place(relx=0.5, rely=0.92, anchor="center")
-        self.btn_reg = ctk.CTkButton(self.frame_video, text="＋ Registrar", font=("Helvetica", 11, "bold"), width=110, height=36, fg_color=C_ADMIN, hover_color="#3C3489", text_color="white", corner_radius=10, command=self._abrir_login)
+        self.btn_reg = ctk.CTkButton(
+            self.frame_video,
+            text="＋ Registrar",
+            font=("Helvetica", 11, "bold"),
+            width=110,
+            height=36,
+            fg_color=C_ADMIN,
+            hover_color="#3C3489",
+            text_color="white",
+            corner_radius=10,
+            #command=self._abrir_login
+            command=lambda: self._abrir_registro({ "id_usuario": 1, "nombre": "Administrador", "apellido_p": "Prueba", "nombre_rol": "ADMIN", "id_rol": 1 })
+        )
         self.btn_reg.place(relx=1.0, rely=1.0, anchor="se", x=-12, y=-12)
 
     def _build_overlays(self):
@@ -814,6 +833,7 @@ class FaceAccess(ctk.CTk):
 
     # ── Login administrativo ──────────────────────────────────────────────────
 
+
     def _build_ov_login(self):
         self.ov_login = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
         ctk.CTkLabel(self.ov_login, text="Acceso administrativo",
@@ -823,12 +843,12 @@ class FaceAccess(ctk.CTk):
         self.entry_mat_l = ctk.CTkEntry(self.ov_login, width=300, height=44,
                                          placeholder_text="Matrícula", font=("Helvetica", 14))
         self.entry_mat_l.pack(pady=8)
-        self.entry_mat_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_mat_l))
+        #self.entry_mat_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_mat_l))
         self.entry_pass_l = ctk.CTkEntry(self.ov_login, width=300, height=44,
                                           placeholder_text="Contraseña", show="*",
                                           font=("Helvetica", 14))
         self.entry_pass_l.pack(pady=8)
-        self.entry_pass_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_pass_l))
+        #self.entry_pass_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_pass_l))
         self.lbl_login_msg = ctk.CTkLabel(self.ov_login, text="", font=("Helvetica", 12), text_color=C_WARN)
         self.lbl_login_msg.pack(pady=6)
         self.btn_login_confirmar = ctk.CTkButton(
@@ -925,12 +945,37 @@ class FaceAccess(ctk.CTk):
                          ("Contraseña","contrasenia")]:
             ctk.CTkLabel(self.ov_registro, text=lbl, font=("Helvetica", 10),
                           text_color=C_TXT2, anchor="w").pack(anchor="w", padx=28)
-            e = ctk.CTkEntry(self.ov_registro, width=320, height=38,
-                              font=("Helvetica", 12),
-                              show="*" if key=="contrasenia" else "")
-            e.pack(pady=(0, 4), padx=28)
-            e.bind("<FocusIn>", lambda ev, entry=e: self._abrir_teclado(entry))
-            self._entries[key] = e
+
+            if key == "contrasenia":
+                frame_pass = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
+                frame_pass.pack(pady=(0, 4), padx=28)
+
+                e = ctk.CTkEntry(
+                    frame_pass,
+                    width=270,
+                    height=38,
+                    font=("Helvetica", 12),
+                    show="*"
+                )
+                e.pack(side="left")
+                self._entries[key] = e
+
+                btn_eye = ctk.CTkButton(
+                    frame_pass,
+                    text="👁",
+                    width=40,
+                    height=38,
+                    command=lambda entry=e: self._toggle_password(entry)
+                )
+                btn_eye.pack(side="left", padx=(5, 0))
+
+            else:
+                e = ctk.CTkEntry(self.ov_registro, width=320, height=38,
+                                font=("Helvetica", 12),
+                                show="*" if key=="contrasenia" else "")
+                e.pack(pady=(0, 4), padx=28)
+                #e.bind("<FocusIn>", lambda ev, entry=e: self._abrir_teclado(entry))
+                self._entries[key] = e
         ctk.CTkLabel(self.ov_registro, text="Rol", font=("Helvetica", 10),
                       text_color=C_TXT2, anchor="w").pack(anchor="w", padx=28)
         self.combo_rol = ctk.CTkComboBox(self.ov_registro, width=320, height=38,
@@ -963,17 +1008,59 @@ class FaceAccess(ctk.CTk):
         self._ocultar_overlays()
         self.ov_registro.place(relx=0, rely=0, relwidth=1, relheight=1)
 
+
+    #Para ojo de contraseña
+    def _toggle_password(self, entry):
+        if entry.cget("show") == "":
+            entry.configure(show="*")
+        else:
+            entry.configure(show="")
+
+
     def _reg_continuar(self):
         datos = {k: e.get().strip() for k, e in self._entries.items()}
         mapa  = {"ADMIN":1,"PERSONAL_AUTORIZADO":2,"PERSONAL_ESCOLAR":3,"ALUMNO":4}
+
+        #Campos obligatorios
         if not all([datos["nombre"], datos["apellido_p"], datos["matricula"], datos["contrasenia"]]):
             self.lbl_reg_err.configure(text="Nombre, apellido, matrícula y contraseña son obligatorios.")
             return
+        
+        # Validar que nombre y apellidos solo contengan letras
+        if not datos["nombre"].replace(" ", "").isalpha():
+            self.lbl_reg_err.configure(
+                text="El nombre solo debe contener letras."
+            )
+            return
+
+        if not datos["apellido_p"].replace(" ", "").isalpha():
+            self.lbl_reg_err.configure(
+                text="El apellido paterno solo debe contener letras."
+            )
+            return
+
+        if datos["apellido_m"] and not datos["apellido_m"].replace(" ", "").isalpha():
+            self.lbl_reg_err.configure(
+                text="El apellido materno solo debe contener letras."
+            )
+            return
+        
+        #Matricula duplicada
         if obtener_usuario_por_matricula(datos["matricula"]):
             self.lbl_reg_err.configure(text=f"La matrícula '{datos['matricula']}' ya existe.")
             return
         datos["id_rol"] = mapa.get(self.combo_rol.get(), 4)
         self._reg_datos = datos
+
+        
+        #contraseña mínima 6 caracteres
+        if len(datos["contrasenia"]) < 6:
+            self.lbl_reg_err.configure(
+                text="La contraseña debe tener mínimo 6 caracteres."
+            )
+            return
+        
+
         self._abrir_captura()
 
     # ── Captura de rostro para registro ──────────────────────────────────────
@@ -985,7 +1072,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_cap_nombre = ctk.CTkLabel(self.ov_captura, text="",
                                             font=("Helvetica", 12), text_color=C_OK)
         self.lbl_cap_nombre.pack(pady=(0, 10))
-        self.lbl_cap_video = ctk.CTkLabel(self.ov_captura, text="", width=320, height=240)
+        self.lbl_cap_video = ctk.CTkLabel(self.ov_captura, text="", width=800, height=550)
         self.lbl_cap_video.pack()
         ctk.CTkLabel(self.ov_captura, text="Mueve la cabeza en distintos ángulos",
                       font=("Helvetica", 11), text_color=C_TXT2).pack(pady=8)
@@ -1007,6 +1094,7 @@ class FaceAccess(ctk.CTk):
     def _abrir_captura(self):
         self._modo = "captura"
         self._cap_imagenes = []
+        self._coincidencias = []
         self._cap_count    = 0
         nom = f"{self._reg_datos['nombre']} {self._reg_datos['apellido_p']}"
         self.lbl_cap_nombre.configure(text=nom)
@@ -1035,7 +1123,7 @@ class FaceAccess(ctk.CTk):
             frame = cv2.flip(frame, 1)
 
         try:
-            mini = cv2.resize(frame, (320, 240))
+            mini = cv2.resize(frame, (800, 550))
             img  = Image.fromarray(cv2.cvtColor(mini, cv2.COLOR_BGR2RGB))
             ci   = ctk.CTkImage(light_image=img, dark_image=img, size=(320, 240))
             self.lbl_cap_video.configure(image=ci, text=""); self._ci_cap = ci
@@ -1048,9 +1136,63 @@ class FaceAccess(ctk.CTk):
 
         if coords is not None:
             x, y, w, h = coords
-            rostro_crop = small[y:y+h, x:x+w]
+            
+            margen = 10
+
+            x1 = max(x + margen, 0)
+            y1 = max(y + margen, 0)
+            x2 = min(x + w - margen, small.shape[1])
+            y2 = min(y + h - margen, small.shape[0])
+
+            rostro_crop = small[y1:y2, x1:x2]
             if rostro_crop.size > 0:
                 rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
+
+                # ecualizar iluminación
+                rostro_res = cv2.equalizeHist(rostro_res)
+
+                # suavizado leve
+                rostro_res = cv2.GaussianBlur(rostro_res, (3,3), 0)
+
+                # Validar si ya existe en el sistema
+                if self._recognizer is not None and self._cap_count >= 15:
+                    try:
+                        id_existente, confianza = buscar(rostro_res, self._recognizer)
+
+                        print(f"[DUPLICADO] ID={id_existente}, confianza={confianza}")
+
+                        if id_existente is not None and confianza < 55:
+                            self._coincidencias.append(id_existente)
+
+                        # Si detecta muchas veces el mismo ID → duplicado real
+                        if len(self._coincidencias) >= 5:
+                            id_mas_repetido = max(
+                                set(self._coincidencias),
+                                key=self._coincidencias.count
+                            )
+
+                            if self._coincidencias.count(id_mas_repetido) >= 4:
+                                usuario_existente = obtener_usuario_por_id(id_mas_repetido)
+
+                                nombre_existente = "Usuario existente"
+                                if usuario_existente:
+                                    nombre_existente = (
+                                        f"{usuario_existente['nombre']} "
+                                        f"{usuario_existente['apellido_p']}"
+                                    )
+
+                                self.lbl_cap_estado.configure(
+                                    text=f"⛔ Rostro ya registrado: {nombre_existente}",
+                                    text_color=C_ERROR
+                                )
+
+                                self.after(2500, self._cancelar_modo)
+                                return
+
+                    except Exception as e:
+                        print(f"[VALIDACIÓN ROSTRO] {e}")
+
+
                 self._cap_imagenes.append(rostro_res)
                 self._cap_count += 1
                 self.lbl_cap_cnt.configure(text=f"{self._cap_count} / {FOTOS_CAPTURA} fotos")
