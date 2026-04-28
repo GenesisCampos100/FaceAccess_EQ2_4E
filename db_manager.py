@@ -126,15 +126,16 @@ def obtener_personal_autorizado() -> list:
 
 def registrar_usuario(nombre: str, apellido_p: str, matricula: str,
                       contrasenia: str, id_rol: int = ROL_ALUMNO,
-                      apellido_m: str = "") -> int:
+                      apellido_m: str = "", grado: str = "", grupo: str = "") -> int:
     """
     Inserta un usuario nuevo. Retorna su id_usuario.
+    Los parámetros grado y grupo son opcionales y se usan principalmente para alumnos.
     """
     with get_connection() as conn:
         cursor = conn.execute(
             "INSERT INTO usuarios (nombre, apellido_p, apellido_m, matricula, "
-            "contrasenia, id_rol) VALUES (?,?,?,?,?,?)",
-            (nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol)
+            "contrasenia, id_rol, grado, grupo) VALUES (?,?,?,?,?,?,?,?)",
+            (nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol, grado, grupo)
         )
         return cursor.lastrowid
 
