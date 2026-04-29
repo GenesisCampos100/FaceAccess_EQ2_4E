@@ -168,6 +168,7 @@ class FaceAccess(ctk.CTk):
         self._ci         = None
         self._np_val     = ""
         self._np_vis     = False
+        self._np_target  = None
 
         self._lock          = threading.Lock()
         self._frame_rec     = None
@@ -638,9 +639,31 @@ class FaceAccess(ctk.CTk):
     def _build_overlays(self):
         self._build_msg()
         self._build_numpad()
+        # Crear teclado de entrada (overlay) desde el inicio para evitar demoras
+        self._build_ov_teclado()
         self._build_ov_login()
         self._build_ov_registro()
         self._build_ov_captura()
+
+    def _build_ov_teclado(self):
+        # Teclado usado por entradas (login/registro). Se crea en inicio para ser rápido.
+        self._kb_mayus = False
+        self._ov_teclado = ctk.CTkFrame(self.frame_video, fg_color="transparent", corner_radius=0)
+
+        # El teclado debe arrancar más abajo para no tapar los inputs del formulario.
+        ctk.CTkLabel(self._ov_teclado, text="", font=("Helvetica", 18, "bold"), text_color=C_TXT).pack(pady=(0, 2))
+
+        # Frame contenedor para las teclas (centra y limita ancho, igual que _np_kb_frame)
+        self._kb_frame = ctk.CTkFrame(self._ov_teclado, fg_color="transparent")
+        self._kb_frame.pack(padx=8, pady=(12, 0), anchor="center")
+
+        # Renderizar teclado dentro de _kb_frame
+        self._kb_renderizar()
+
+        # Botones de acción (Espacio / Listo) en la parte inferior del overlay
+        fa = ctk.CTkFrame(self._ov_teclado, fg_color="transparent")
+        fa.pack(pady=(8, 10))
+        # Espacio y Listo se crean en _kb_renderizar pero dejamos este frame disponible
 
     def _build_msg(self):
         self.ov_msg = ctk.CTkFrame(self.frame_video, corner_radius=0,
@@ -818,15 +841,68 @@ class FaceAccess(ctk.CTk):
         self._en_pausa = True; self._np_vis = True
         self._ocultar_msg()
         self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
+        try:
+            self.ov_numpad.lift()
+        except Exception:
+            pass
+
+    def _mostrar_numpad_para_entry(self, entry):
+        """
+        Muestra el numpad reutilizable para editar una entrada (`entry`).
+        Cuando `self._np_target` esté apuntando al entry, las teclas escribirán
+        directamente en dicho widget en lugar de en `lbl_np`.
+        """
+        self._np_target = entry
+        self._np_vis = True
+        self._en_pausa = True
+        self._ocultar_msg()
+        # No modificar self._np_val ni lbl_np — trabajamos sobre el entry existente
+        try:
+            entry.focus_set()
+        except Exception:
+            pass
+        self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
+        try:
+            self.ov_numpad.lift()
+        except Exception:
+            pass
 
     def _np_press(self, t):
+        # Si se abrió el numpad apuntando a un entry, insertar ahí
+        if getattr(self, "_np_target", None) is not None:
+            try:
+                val = self._np_target.get()
+                # límite de seguridad, no romper el layout
+                if len(val) < 100:
+                    self._np_target.insert("end", t)
+            except Exception:
+                pass
+            return
+
         if len(self._np_val) < 15:
             self._np_val += t; self.lbl_np.configure(text=self._np_val)
 
     def _np_del(self):
+        # Si estamos editando un entry objetivo, borrar allí
+        if getattr(self, "_np_target", None) is not None:
+            try:
+                val = self._np_target.get()
+                self._np_target.delete(0, "end")
+                self._np_target.insert(0, val[:-1])
+            except Exception:
+                pass
+            return
+
         self._np_val = self._np_val[:-1]; self.lbl_np.configure(text=self._np_val or "")
 
     def _np_ok(self):
+        # Si el numpad fue abierto para editar un entry, simplemente cerrar
+        if getattr(self, "_np_target", None) is not None:
+            self.ov_numpad.place_forget(); self._np_vis = False
+            self._en_pausa = False; self.fallos = 0
+            self._np_target = None
+            return
+
         mat = self._np_val
         self.ov_numpad.place_forget(); self._np_vis = False
         self._en_pausa = False; self.fallos = 0
@@ -845,6 +921,12 @@ class FaceAccess(ctk.CTk):
         self._en_pausa = True; self._t_pausa = datetime.now()
 
     def _np_cancelar(self):
+        # Si estábamos editando un entry, sólo cerrar y restaurar estado
+        if getattr(self, "_np_target", None) is not None:
+            self.ov_numpad.place_forget(); self._np_vis = False; self._en_pausa = False
+            self._np_target = None
+            return
+
         self.ov_numpad.place_forget(); self._np_vis = False; self._en_pausa = False
         self.fallos = 0; self._buffer = []; self._frames_desc = 0
         self._set_estado("escaneando")
@@ -854,27 +936,27 @@ class FaceAccess(ctk.CTk):
     def _build_ov_login(self):
         self.ov_login = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
         ctk.CTkLabel(self.ov_login, text="Acceso administrativo",
-                     font=("Helvetica", 16, "bold"), text_color=C_TXT).pack(pady=(40, 6))
+                     font=("Helvetica", 20, "bold"), text_color=C_TXT).pack(pady=(40, 6))
         ctk.CTkLabel(self.ov_login, text="Ingresa tus credenciales y\nacerca tu rostro para confirmar.",
-                     font=("Helvetica", 12), text_color=C_TXT2, justify="center").pack(pady=(0, 24))
+                     font=("Helvetica", 15), text_color=C_TXT2, justify="center").pack(pady=(0, 24))
         self.entry_mat_l = ctk.CTkEntry(self.ov_login, width=300, height=44,
-                                         placeholder_text="Matrícula", font=("Helvetica", 14))
+                         placeholder_text="Matrícula", font=("Helvetica", 17))
         self.entry_mat_l.pack(pady=8)
         self.entry_mat_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_mat_l))
         self.entry_pass_l = ctk.CTkEntry(self.ov_login, width=300, height=44,
                                           placeholder_text="Contraseña", show="*",
-                                          font=("Helvetica", 14))
+                          font=("Helvetica", 17))
         self.entry_pass_l.pack(pady=8)
         self.entry_pass_l.bind("<FocusIn>", lambda e: self._abrir_teclado(self.entry_pass_l))
-        self.lbl_login_msg = ctk.CTkLabel(self.ov_login, text="", font=("Helvetica", 12), text_color=C_WARN)
+        self.lbl_login_msg = ctk.CTkLabel(self.ov_login, text="", font=("Helvetica", 15), text_color=C_WARN)
         self.lbl_login_msg.pack(pady=6)
         self.btn_login_confirmar = ctk.CTkButton(
             self.ov_login, text="Confirmar con rostro", width=260, height=46,
-            font=("Helvetica", 14, "bold"), fg_color=C_OK, text_color=C_BG,
+            font=("Helvetica", 17, "bold"), fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A", corner_radius=12, command=self._login_confirmar)
         self.btn_login_confirmar.pack(pady=10)
         ctk.CTkButton(self.ov_login, text="Cancelar", fg_color="transparent",
-                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 12),
+                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 14),
                        command=self._cancelar_modo).pack(pady=(4, 0))
 
     def _abrir_login(self):
@@ -942,8 +1024,9 @@ class FaceAccess(ctk.CTk):
     def _cancelar_modo(self):
         modo_anterior = self._modo
         self._ocultar_overlays(); self._modo = "acceso"; self._en_pausa = False
-        self._np_vis = False; self._buffer = []; self._frames_desc = 0
+        self._np_vis = False; self._buffer = []; self._frames_desc = 0; self.fallos = 0
         self._set_estado("escaneando")
+        self._kb_cerrar()
         if modo_anterior == "captura":
             self._loop_camara()
 
@@ -1153,7 +1236,9 @@ class FaceAccess(ctk.CTk):
     # ── Overlays y estado ─────────────────────────────────────────────────────
 
     def _ocultar_overlays(self):
-        for ov in [self.ov_numpad, self.ov_login, self.ov_registro, self.ov_captura]:
+        for ov in [self.ov_numpad, self.ov_login, self.ov_registro, self.ov_captura, getattr(self, "_ov_teclado", None)]:
+            if ov is None:
+                continue
             ov.place_forget()
         self._ocultar_msg()
 
@@ -1208,26 +1293,33 @@ class FaceAccess(ctk.CTk):
     # ── Teclado virtual táctil ────────────────
 
     def _abrir_teclado(self, entry_target):
+        # Mostrar el teclado pre-creado y actualizar target/mayus
         if hasattr(self, "_ov_teclado") and self._ov_teclado.winfo_ismapped():
             self._ov_teclado.place_forget()
         self._kb_target = entry_target
         self._kb_mayus  = False
-        if not hasattr(self, "_ov_teclado"):
-            self._ov_teclado = ctk.CTkFrame(self, fg_color="#0A1520", corner_radius=0)
-        for w in self._ov_teclado.winfo_children():
-            w.destroy()
-        self._kb_renderizar()
-        # Ocupa el 65% inferior de la pantalla 
-        self._ov_teclado.place(relx=0, rely=0.35, relwidth=1, relheight=0.65)
-        self._ov_teclado.lift()
+        # Re-renderizar sólo para reflejar mayúsculas si aplica
+        if hasattr(self, "_ov_teclado"):
+            self._kb_renderizar()
+            # Colocar el teclado en la parte inferior para dejar visibles los inputs
+            self._ov_teclado.place(relx=0, rely=0.47, relwidth=1, relheight=0.53)
+            try:
+                self._ov_teclado.lift()
+            except Exception:
+                pass
 
     def _kb_renderizar(self):
-        for w in self._ov_teclado.winfo_children():
-            w.destroy()
+        # Limpiar contenedor de teclas si ya existe; evitar destruir el frame principal
+        if hasattr(self, "_kb_frame") and self._kb_frame is not None:
+            for w in self._kb_frame.winfo_children():
+                w.destroy()
+        elif hasattr(self, "_ov_teclado"):
+            for w in self._ov_teclado.winfo_children():
+                w.destroy()
 
         # Franja superior para separar visualmente el teclado del header.
         # Mantiene el overlay ocupando toda la zona inferior, pero empuja el contenido hacia abajo.
-        self._ov_teclado.grid_rowconfigure(0, minsize=26)
+        self._ov_teclado.grid_rowconfigure(0, minsize=0)
 
         BW  = self._KB_BW
         BH  = self._KB_BH
@@ -1236,20 +1328,28 @@ class FaceAccess(ctk.CTk):
         FS  = self._KB_FS
 
         filas = [
-            ["1","2","3","4","5","6","7","8","9","0","⌫"],
-            ["Q","W","E","R","T","Y","U","I","O","P"],
-            ["A","S","D","F","G","H","J","K","L"],
-            ["⇧","Z","X","C","V","B","N","M","-","_"],
+            ["1","2","3","4","5","6","7","8","9"],
+            ["0","Q","W","E","R","T","Y","U","I"],
+            ["O","P","A","S","D","F","G","H","J"],
+            ["K","L","Z","X","C","V","B","N","M"],
+            ["-","⇧","⌫"]
         ]
 
+        max_cols = max(len(fila) for fila in filas)
+        for col in range(max_cols):
+            self._kb_frame.grid_columnconfigure(col, weight=1, uniform="kb_keys")
+
         for r_idx, fila in enumerate(filas):
+            start_col = (max_cols - len(fila)) // 2
             for c_idx, tecla in enumerate(fila):
-                texto = tecla if not tecla.isalpha() else (tecla if self._kb_mayus else tecla.lower())
+                texto = tecla
+                if tecla.isalpha():
+                    texto = tecla if self._kb_mayus else tecla.lower()
 
                 if tecla == "⌫":
-                    b = ctk.CTkButton(
-                        self._ov_teclado, text=tecla,
-                        width=BW + 10, height=BH,
+                    btn = ctk.CTkButton(
+                        self._kb_frame, text=tecla,
+                        width=BW, height=BH,
                         font=("Helvetica", FS),
                         fg_color=C_FRAME, text_color=C_ERROR,
                         hover_color=C_BORDE,
@@ -1257,9 +1357,9 @@ class FaceAccess(ctk.CTk):
                         corner_radius=8, command=self._kb_del)
 
                 elif tecla == "⇧":
-                    b = ctk.CTkButton(
-                        self._ov_teclado, text=tecla,
-                        width=BW + 10, height=BH,
+                    btn = ctk.CTkButton(
+                        self._kb_frame, text=tecla,
+                        width=BW, height=BH,
                         font=("Helvetica", FS + 3, "bold"),
                         fg_color=C_OK if self._kb_mayus else C_FRAME,
                         text_color=C_BG if self._kb_mayus else C_TXT,
@@ -1268,8 +1368,8 @@ class FaceAccess(ctk.CTk):
                         corner_radius=8, command=self._kb_toggle_mayus)
 
                 else:
-                    b = ctk.CTkButton(
-                        self._ov_teclado, text=texto,
+                    btn = ctk.CTkButton(
+                        self._kb_frame, text=texto,
                         width=BW, height=BH,
                         font=("Helvetica", FS, "bold"),
                         fg_color=C_FRAME, text_color=C_TXT,
@@ -1278,11 +1378,11 @@ class FaceAccess(ctk.CTk):
                         corner_radius=8,
                         command=lambda t=texto: self._kb_press(t))
 
-                b.grid(row=r_idx + 1, column=c_idx, padx=PAD_X, pady=PAD_Y)
+                btn.grid(row=r_idx, column=start_col + c_idx, padx=PAD_X, pady=PAD_Y)
 
-        # Fila inferior: Espacio + Listo
+        # Fila inferior: Espacio + Listo (usar frame de acciones en el overlay)
         fb = ctk.CTkFrame(self._ov_teclado, fg_color="transparent")
-        fb.grid(row=5, column=0, columnspan=11, padx=PAD_X, pady=(4, 8), sticky="ew")
+        fb.pack(padx=PAD_X, pady=(8, 6))
 
         ctk.CTkButton(
             fb, text="Espacio",
