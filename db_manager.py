@@ -39,7 +39,9 @@ def login(matricula: str, contrasenia: str):
     """
     Valida credenciales (matrícula + contraseña).
     Retorna la fila del usuario si es válido y está activo, o None.
+    Convierte matrícula a mayúsculas para búsqueda.
     """
+    matricula = matricula.upper() if matricula else ""
     with get_connection() as conn:
         usuario = conn.execute(
             "SELECT u.*, r.nombre_rol FROM usuarios u "
@@ -105,7 +107,11 @@ def obtener_usuario_por_id(id_usuario: int):
 
 
 def obtener_usuario_por_matricula(matricula: str):
-    """Retorna fila completa del usuario por matrícula o None."""
+    """
+    Retorna fila completa del usuario por matrícula o None.
+    Convierte matrícula a mayúsculas para búsqueda.
+    """
+    matricula = matricula.upper() if matricula else ""
     with get_connection() as conn:
         return conn.execute(
             "SELECT u.*, r.nombre_rol FROM usuarios u "
@@ -130,14 +136,36 @@ def registrar_usuario(nombre: str, apellido_p: str, matricula: str,
     """
     Inserta un usuario nuevo. Retorna su id_usuario.
     Los parámetros grado y grupo son opcionales y se usan principalmente para alumnos.
+    
+    Usa transacción: si hay error, hace ROLLBACK automático.
+    Convierte todos los campos a mayúsculas (excepto contraseña).
     """
-    with get_connection() as conn:
+    # Convertir a mayúsculas
+    nombre = nombre.upper() if nombre else ""
+    apellido_p = apellido_p.upper() if apellido_p else ""
+    apellido_m = apellido_m.upper() if apellido_m else ""
+    matricula = matricula.upper() if matricula else ""
+    grado = grado.upper() if grado else ""
+    grupo = grupo.upper() if grupo else ""
+    
+    conn = None
+    try:
+        conn = get_connection()
+        # Transacción explícita
         cursor = conn.execute(
             "INSERT INTO usuarios (nombre, apellido_p, apellido_m, matricula, "
             "contrasenia, id_rol, grado, grupo) VALUES (?,?,?,?,?,?,?,?)",
             (nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol, grado, grupo)
         )
-        return cursor.lastrowid
+        user_id = cursor.lastrowid
+        conn.commit()  # Confirmar transacción
+        print(f"[BD] Usuario registrado: {nombre} {apellido_p} (ID {user_id})")
+        return user_id
+    except Exception as e:
+        if conn:
+            conn.rollback()  # Deshacer cambios si hay error
+        print(f"[ERROR BD] No se pudo registrar usuario: {e}")
+        raise  # Re-lanzar excepción para que la maneje ReconocimientoFacial.py
 
 
 def desactivar_usuario(id_usuario: int):

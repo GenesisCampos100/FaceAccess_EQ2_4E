@@ -15,7 +15,9 @@ from db_manager import (
 )
 
 # ─── Rutas y parámetros ───────────────────────────────────────────────────────
-MODELO_LBPH      = "modelo_lbph.xml"   # archivo donde se persiste el modelo
+# Usar ruta ABSOLUTA para el modelo para evitar problemas de directorio de trabajo
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+MODELO_LBPH      = os.path.join(_script_dir, "modelo_lbph.xml")
 FACE_SIZE        = (200, 200)          # tamaño al que se normalizan los rostros
 HAAR_CASCADE     = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
@@ -95,33 +97,40 @@ def cargar_dataset() -> tuple[list, list]:
       - imagenes_grises: lista de arrays numpy en escala de grises (200x200)
       - labels: lista de id_usuario (int) correspondiente a cada imagen
     """
+    print(f"[LBPH] Cargando dataset...")
     datos = obtener_todos_encodings()   # [(id_usuario, ruta_carpeta)]
     imagenes = []
     labels   = []
 
+    print(f"[LBPH] Encontrados {len(datos)} usuario(s) en BD")
+    
     for id_usuario, ruta_carpeta in datos:
         if not ruta_carpeta or not os.path.isdir(ruta_carpeta):
-            print(f"[AVISO] Carpeta no encontrada para ID {id_usuario}: {ruta_carpeta}")
+            print(f"[LBPH] ⚠ Carpeta no encontrada para ID {id_usuario}: {ruta_carpeta}")
             continue
 
         archivos = [f for f in os.listdir(ruta_carpeta)
                     if f.lower().endswith((".jpg", ".jpeg", ".png"))]
 
         if not archivos:
-            print(f"[AVISO] Sin imágenes en carpeta de ID {id_usuario}")
+            print(f"[LBPH] ⚠ Sin imágenes en carpeta de ID {id_usuario}: {ruta_carpeta}")
             continue
 
+        print(f"[LBPH] Cargando {len(archivos)} imágenes de ID {id_usuario}")
+        
         for archivo in archivos:
             ruta_img = os.path.join(ruta_carpeta, archivo)
             img = cv2.imread(ruta_img, cv2.IMREAD_GRAYSCALE)
             if img is None:
+                print(f"[LBPH] ⚠ No se pudo leer: {ruta_img}")
                 continue
             # Normalizar tamaño para consistencia en el histograma LBP
             img_res = cv2.resize(img, FACE_SIZE)
             imagenes.append(img_res)
             labels.append(id_usuario)   # label = id_usuario (entero)
 
-    print(f"[INFO] Dataset cargado: {len(imagenes)} imágenes de {len(set(labels))} usuarios.")
+    usuarios_unicos = len(set(labels))
+    print(f"[LBPH] ✓ Dataset cargado: {len(imagenes)} imágenes de {usuarios_unicos} usuario(s)")
     return imagenes, labels
 
 
@@ -138,6 +147,7 @@ def entrenar() -> bool:
       - grid_y=8      → 8 celdas verticales para el histograma
       - threshold=∞   → sin umbral interno (lo manejamos nosotros al predecir)
     """
+    print(f"[LBPH] Iniciando entrenamiento...")
     imagenes, labels = cargar_dataset()
 
     if not imagenes:
@@ -148,25 +158,50 @@ def entrenar() -> bool:
         print("[ERROR] Se necesita al menos 1 usuario con imágenes.")
         return False
 
-    print(f"[INFO] Entrenando LBPH con {len(imagenes)} imágenes...")
+    usuarios_unicos = len(set(labels))
+    print(f"[LBPH] Cargadas {len(imagenes)} imágenes de {usuarios_unicos} usuario(s)")
 
     # Crear el reconocedor LBPH
     # cv2.face.LBPHFaceRecognizer_create() requiere opencv-contrib-python
-    recognizer = cv2.face.LBPHFaceRecognizer_create(
-        radius=1,
-        neighbors=8,
-        grid_x=8,
-        grid_y=8
-    )
+    try:
+        recognizer = cv2.face.LBPHFaceRecognizer_create(
+            radius=1,
+            neighbors=8,
+            grid_x=8,
+            grid_y=8
+        )
+        print(f"[LBPH] Reconocedor LBPH creado")
+    except Exception as e:
+        print(f"[ERROR] Error creando reconocedor LBPH: {e}")
+        return False
 
     # El entrenamiento asigna a cada histograma LBP su label correspondiente
-    recognizer.train(imagenes, np.array(labels, dtype=np.int32))
+    try:
+        print(f"[LBPH] Entrenando con imágenes...")
+        recognizer.train(imagenes, np.array(labels, dtype=np.int32))
+        print(f"[LBPH] ✓ Entrenamiento completado")
+    except Exception as e:
+        print(f"[ERROR] Error durante el entrenamiento: {e}")
+        return False
 
     # Guardar en disco para que el sistema de acceso lo cargue al iniciar
-    recognizer.save(MODELO_LBPH)
-    print(f"[OK] Modelo guardado en: {MODELO_LBPH}")
-    print(f"[OK] {len(set(labels))} usuario(s) en el modelo.")
-    return True
+    try:
+        recognizer.save(MODELO_LBPH)
+        print(f"[LBPH] ✓ Modelo guardado en: {MODELO_LBPH}")
+        
+        # Verificar que el archivo se guardó correctamente
+        if os.path.exists(MODELO_LBPH):
+            tamaño = os.path.getsize(MODELO_LBPH)
+            print(f"[LBPH] ✓ Archivo verificado ({tamaño} bytes)")
+        else:
+            print(f"[ERROR] Archivo NO se guardó en {MODELO_LBPH}")
+            return False
+            
+        print(f"[LBPH] ✓ {usuarios_unicos} usuario(s) en el modelo")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Error guardando modelo: {e}")
+        return False
 
 
 # ─── Cargar modelo en memoria (para ReconocimientoFacial.py) ─────────────────
@@ -176,15 +211,24 @@ def cargar_modelo_lbph():
     Llamado internamente por ReconocimientoFacial.py al iniciar.
     Retorna el reconocedor, o None si no existe el archivo.
     """
+    print(f"[LBPH] Cargando modelo desde: {MODELO_LBPH}")
+    
     if not os.path.exists(MODELO_LBPH):
-        print(f"[AVISO] Modelo LBPH no encontrado: {MODELO_LBPH}")
+        print(f"[ERROR] Modelo LBPH no encontrado: {MODELO_LBPH}")
         print("[INFO] Ejecuta entrenadoRF.py para generar el modelo.")
         return None
 
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(MODELO_LBPH)
-    print(f"[INFO] Modelo LBPH cargado desde: {MODELO_LBPH}")
-    return recognizer
+    try:
+        tamaño = os.path.getsize(MODELO_LBPH)
+        print(f"[LBPH] Archivo encontrado ({tamaño} bytes)")
+        
+        recognizer = cv2.face.LBPHFaceRecognizer_create()
+        recognizer.read(MODELO_LBPH)
+        print(f"[LBPH] ✓ Modelo cargado en memoria")
+        return recognizer
+    except Exception as e:
+        print(f"[ERROR] Error cargando modelo LBPH: {e}")
+        return None
 
 
 # ─── Compatibilidad: función que antes cargaba encodings en RAM ───────────────
