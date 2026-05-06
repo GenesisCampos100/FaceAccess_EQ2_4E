@@ -2,6 +2,11 @@
 db_manager.py — Módulo central de conexión a la BD para el sistema FaceAccess.
 Todas las operaciones con la base de datos pasan por aquí.
 
+ARQUITECTURA BIOMÉTRICA (corregida):
+  - Las imágenes del rostro se guardan en DISCO: data_rostros/<id>_<nombre>/
+  - La BD solo guarda METADATOS: quién tiene biométrico, dónde y desde cuándo.
+  - La tabla imagenes_biometricas (BLOB) fue eliminada — es innecesaria con LBPH.
+  - datos_biometricos.encoding almacena la RUTA de la carpeta en disco.
 """
 
 import sqlite3
@@ -18,7 +23,7 @@ ROL_PERSONAL_ESCOLAR    = 3
 ROL_ALUMNO              = 4
 
 # ─── Carpeta raíz donde se guardan las imágenes de rostros por usuario ────────
-# Cada usuario tiene su subcarpeta: DATA_DIR/<id_usuario>_<nombre>/
+# Estructura: DATA_DIR/<id_usuario>_<nombre>_<apellido>/rostro_000.jpg ...
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_rostros")
 
 
@@ -39,7 +44,10 @@ def login(matricula: str, contrasenia: str):
     """
     Valida credenciales (matrícula + contraseña).
     Retorna la fila del usuario si es válido y está activo, o None.
+    Convierte matrícula a mayúsculas para búsqueda (mejora: evita errores por minúsculas).
     """
+    # CAMBIO: normalizar a mayúsculas antes de buscar en BD
+    matricula = matricula.upper() if matricula else ""
     with get_connection() as conn:
         usuario = conn.execute(
             "SELECT u.*, r.nombre_rol FROM usuarios u "
@@ -105,7 +113,12 @@ def obtener_usuario_por_id(id_usuario: int):
 
 
 def obtener_usuario_por_matricula(matricula: str):
-    """Retorna fila completa del usuario por matrícula o None."""
+    """
+    Retorna fila completa del usuario por matrícula o None.
+    Convierte matrícula a mayúsculas para búsqueda.
+    """
+    # CAMBIO: normalizar a mayúsculas antes de buscar en BD
+    matricula = matricula.upper() if matricula else ""
     with get_connection() as conn:
         return conn.execute(
             "SELECT u.*, r.nombre_rol FROM usuarios u "
@@ -126,17 +139,42 @@ def obtener_personal_autorizado() -> list:
 
 def registrar_usuario(nombre: str, apellido_p: str, matricula: str,
                       contrasenia: str, id_rol: int = ROL_ALUMNO,
-                      apellido_m: str = "") -> int:
+                      apellido_m: str = "", grado: str = "", grupo: str = "") -> int:
     """
     Inserta un usuario nuevo. Retorna su id_usuario.
+    Los parámetros grado y grupo son opcionales (principalmente para alumnos).
+
+    CAMBIOS respecto a versión anterior:
+      - Todos los campos de texto se normalizan a mayúsculas (excepto contraseña).
+      - Se agregaron los campos grado y grupo al INSERT.
+      - Transacción explícita con rollback si ocurre algún error.
     """
-    with get_connection() as conn:
+    # CAMBIO: normalizar todos los campos a mayúsculas
+    nombre     = nombre.upper()     if nombre     else ""
+    apellido_p = apellido_p.upper() if apellido_p else ""
+    apellido_m = apellido_m.upper() if apellido_m else ""
+    matricula  = matricula.upper()  if matricula  else ""
+    grado      = grado.upper()      if grado      else ""
+    grupo      = grupo.upper()      if grupo      else ""
+
+    conn = None
+    try:
+        conn = get_connection()
+        # CAMBIO: transacción explícita con commit/rollback
         cursor = conn.execute(
             "INSERT INTO usuarios (nombre, apellido_p, apellido_m, matricula, "
-            "contrasenia, id_rol) VALUES (?,?,?,?,?,?)",
-            (nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol)
+            "contrasenia, id_rol, grado, grupo) VALUES (?,?,?,?,?,?,?,?)",
+            (nombre, apellido_p, apellido_m, matricula, contrasenia, id_rol, grado, grupo)
         )
-        return cursor.lastrowid
+        user_id = cursor.lastrowid
+        conn.commit()
+        print(f"[BD] Usuario registrado: {nombre} {apellido_p} (ID {user_id})")
+        return user_id
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"[ERROR BD] No se pudo registrar usuario: {e}")
+        raise  # Re-lanzar para que lo maneje quien llame a esta función
 
 
 def desactivar_usuario(id_usuario: int):
@@ -149,54 +187,70 @@ def desactivar_usuario(id_usuario: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  DATOS BIOMÉTRICOS
-#  Con LBPH ya NO se guardan vectores de 128 dimensiones.
-#  En su lugar, se guarda la ruta de la carpeta de imágenes del usuario.
-#  El campo "encoding" de la tabla se reutiliza para almacenar esa ruta.
+#  DATOS BIOMÉTRICOS — SOLO METADATOS EN BD, IMÁGENES EN DISCO
+#
+#  Las imágenes del rostro viven en disco: data_rostros/<id>_<nombre>/
+#  La BD (tabla datos_biometricos) solo registra:
+#    · id_usuario          → a quién pertenece
+#    · encoding            → ruta de la carpeta en disco (referencia)
+#    · fecha_actualizacion → cuándo se registró o actualizó por última vez
+#
+#  ¿Por qué disco y no BLOB?
+#    LBPH necesita todas las imágenes crudas en RAM para re-entrenarse.
+#    Guardarlas como BLOB en SQLite implica deserializarlas todas cada vez,
+#    inflando la BD y haciendo el entrenamiento más lento, especialmente
+#    en Raspberry Pi. Los archivos JPG en disco son más rápidos y simples.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def guardar_encoding(id_usuario: int, ruta_o_datos: str):
+def guardar_encoding(id_usuario: int, ruta_carpeta: str):
     """
-    Guarda o actualiza la ruta de carpeta de imágenes del usuario.
-    Parámetro reutilizado: antes era el vector JSON, ahora es la ruta en disco.
-    Usa UPSERT para no duplicar registros.
+    Registra o actualiza el metadato biométrico del usuario en la BD.
+    Guarda la ruta de la carpeta donde están sus imágenes en disco.
+
+    Parámetros:
+      id_usuario    — ID del usuario registrado
+      ruta_carpeta  — ruta a la carpeta de imágenes
+                      Ejemplo: "data_rostros/5_Juan_Garcia"
     """
-    conn = None
-    try:
-        conn = get_connection()
+    with get_connection() as conn:
         conn.execute(
             "INSERT INTO datos_biometricos (id_usuario, encoding, fecha_actualizacion) "
             "VALUES (?, ?, CURRENT_TIMESTAMP) "
             "ON CONFLICT(id_usuario) DO UPDATE SET "
-            "encoding=excluded.encoding, fecha_actualizacion=CURRENT_TIMESTAMP",
-            (id_usuario, ruta_o_datos)
+            "encoding = excluded.encoding, "
+            "fecha_actualizacion = CURRENT_TIMESTAMP",
+            (id_usuario, ruta_carpeta)
         )
-        conn.commit()
-        print(f"[BD] Ruta biométrica guardada para id_usuario {id_usuario}")
-    except sqlite3.OperationalError as e:
-        print(f"[ERROR BD] No se pudo guardar: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if conn:
-            conn.close()
+    print(f"[BD] Metadato biométrico guardado: ID {id_usuario} → {ruta_carpeta}")
 
 
-def obtener_encoding(id_usuario: int) -> str | None:
-    """Retorna la ruta almacenada del usuario, o None si no existe."""
+def tiene_biometrico(id_usuario: int) -> bool:
+    """
+    Retorna True si el usuario tiene rostro registrado.
+    CAMBIO: verifica en datos_biometricos Y que la carpeta exista físicamente
+    en disco. Evita falsos positivos cuando la carpeta fue eliminada del disco.
+    """
     with get_connection() as conn:
         row = conn.execute(
             "SELECT encoding FROM datos_biometricos WHERE id_usuario = ?",
             (id_usuario,)
         ).fetchone()
-    return row["encoding"] if row else None
+
+    if not row:
+        return False
+
+    ruta = row["encoding"]
+    if not os.path.isdir(ruta):
+        print(f"[AVISO] Metadato en BD pero carpeta no encontrada: {ruta}")
+        return False
+
+    return True
 
 
-def obtener_todos_encodings():
+def obtener_todos_encodings() -> list:
     """
-    Retorna lista de (id_usuario, ruta) de todos los usuarios activos
-    que tienen datos biométricos registrados.
-    Mantiene la firma original para compatibilidad.
+    Retorna lista de (id_usuario, ruta_carpeta) de todos los usuarios activos
+    que tienen datos biométricos registrados Y cuya carpeta existe en disco.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -205,51 +259,58 @@ def obtener_todos_encodings():
             "JOIN usuarios u ON u.id_usuario = db.id_usuario "
             "WHERE u.estatus = 1"
         ).fetchall()
-    return [(r["id_usuario"], r["encoding"]) for r in rows]
+
+    resultado = []
+    for r in rows:
+        ruta = r["encoding"]
+        if os.path.isdir(ruta):
+            resultado.append((r["id_usuario"], ruta))
+        else:
+            print(f"[AVISO] Carpeta no encontrada para ID {r['id_usuario']}: {ruta}")
+
+    return resultado
 
 
-def tiene_biometrico(id_usuario: int) -> bool:
-    """Retorna True si el usuario ya tiene rostro registrado."""
-    return obtener_encoding(id_usuario) is not None
+def obtener_encoding(id_usuario: int):
+    """Retorna la ruta de carpeta del usuario o None."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT encoding FROM datos_biometricos WHERE id_usuario = ?",
+            (id_usuario,)
+        ).fetchone()
+    return row["encoding"] if row else None
 
 
-def obtener_carpeta_usuario(id_usuario: int) -> str:
-    """
-    Retorna la ruta de la carpeta de imágenes del usuario.
-    Si no existe en BD, la construye a partir del nombre.
-    """
-    ruta = obtener_encoding(id_usuario)
-    if ruta:
-        return ruta
-    # Construir ruta por defecto
-    u = obtener_usuario_por_id(id_usuario)
-    if u:
-        nombre = f"{u['nombre']}_{u['apellido_p']}"
-        return os.path.join(DATA_DIR, f"{id_usuario}_{nombre}")
-    return os.path.join(DATA_DIR, str(id_usuario))
+def obtener_carpeta_usuario(id_usuario: int) -> str | None:
+    """Retorna la ruta de la carpeta de imágenes del usuario o None."""
+    return obtener_encoding(id_usuario)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ACCESOS  (entrada / salida)
+#  ACCESOS  (solo entradas — sin registro de salida)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def registrar_entrada(id_usuario: int, metodo: str = "facial") -> int:
     """
     Registra una entrada.
-    Si ya hay un acceso abierto hoy para este usuario, retorna ese id_acceso.
+    Si el mismo usuario ya tiene un registro en los últimos 10 segundos,
+    se descarta silenciosamente para evitar duplicados por reconocimiento múltiple.
+    Pasados los 10 segundos, cualquier nueva pasada genera un registro nuevo.
+    Retorna el id_acceso (nuevo o existente).
     """
     hoy        = date.today().isoformat()
     hora_ahora = datetime.now().strftime("%H:%M:%S")
 
     with get_connection() as conn:
-        existente = conn.execute(
+        reciente = conn.execute(
             "SELECT id_acceso FROM accesos "
-            "WHERE id_usuario = ? AND fecha = ? AND hora_salida IS NULL",
+            "WHERE id_usuario = ? AND fecha = ? "
+            "AND hora_entrada >= time('now', '-10 seconds', 'localtime')",
             (id_usuario, hoy)
         ).fetchone()
 
-        if existente:
-            return existente["id_acceso"]
+        if reciente:
+            return reciente["id_acceso"]
 
         cursor = conn.execute(
             "INSERT INTO accesos (id_usuario, fecha, hora_entrada, metodo) "
@@ -257,35 +318,6 @@ def registrar_entrada(id_usuario: int, metodo: str = "facial") -> int:
             (id_usuario, hoy, hora_ahora, metodo)
         )
         return cursor.lastrowid
-
-
-def registrar_salida(id_usuario: int) -> bool:
-    """
-    Cierra el acceso abierto más reciente del usuario hoy.
-    Retorna True si encontró un acceso abierto, False si no.
-    """
-    hoy        = date.today().isoformat()
-    hora_ahora = datetime.now().strftime("%H:%M:%S")
-
-    with get_connection() as conn:
-        resultado = conn.execute(
-            "UPDATE accesos SET hora_salida = ? "
-            "WHERE id_usuario = ? AND fecha = ? AND hora_salida IS NULL",
-            (hora_ahora, id_usuario, hoy)
-        )
-        return resultado.rowcount > 0
-
-
-def tiene_entrada_abierta(id_usuario: int) -> bool:
-    """Retorna True si el usuario ya tiene una entrada sin salida registrada hoy."""
-    hoy = date.today().isoformat()
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT id_acceso FROM accesos "
-            "WHERE id_usuario = ? AND fecha = ? AND hora_salida IS NULL",
-            (id_usuario, hoy)
-        ).fetchone()
-    return row is not None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

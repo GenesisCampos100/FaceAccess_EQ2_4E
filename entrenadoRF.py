@@ -1,5 +1,10 @@
 """
 entrenadoRF.py — Entrenamiento y verificación del modelo LBPH.
+
+ARQUITECTURA (corregida):
+  - cargar_dataset() lee las imágenes desde DISCO (data_rostros/<id>_<nombre>/).
+  - La BD solo se consulta para saber qué usuarios existen y tienen metadato.
+  - El modelo .xml sigue guardándose en disco (es el resultado del entrenamiento).
 """
 
 import cv2
@@ -14,35 +19,28 @@ from db_manager import (
     DATA_DIR,
 )
 
-# ─── Rutas y parámetros ───────────────────────────────────────────────────────
-MODELO_LBPH      = "modelo_lbph.xml"   # archivo donde se persiste el modelo
-FACE_SIZE        = (200, 200)          # tamaño al que se normalizan los rostros
-HAAR_CASCADE     = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+# ── CAMBIO 1: ruta absoluta para evitar problemas de directorio de trabajo ───
+_script_dir  = os.path.dirname(os.path.abspath(__file__))
+MODELO_LBPH  = os.path.join(_script_dir, "modelo_lbph.xml")
+FACE_SIZE    = (200, 200)
+HAAR_CASCADE = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
 
-# ─── Crear detector Haar ──────────────────────────────────────────────────────
 def crear_detector_haar():
-    """
-    Crea el detector de rostros con Haar Cascade.
-    Haar Cascade es un método clásico basado en características de Haar
-    y clasificadores en cascada de Adaboost. No usa redes neuronales.
-    """
     detector = cv2.CascadeClassifier(HAAR_CASCADE)
     if detector.empty():
         raise RuntimeError(f"No se pudo cargar: {HAAR_CASCADE}")
-    print(f"[INFO] Haar Cascade cargado: {HAAR_CASCADE}")
     return detector
 
 
-# ─── Verificar estado de imágenes por usuario ────────────────────────────────
 def verificar_encodings():
     """
-    Muestra el estado de imágenes de todos los usuarios activos.
-    En LBPH el 'encoding' equivale a tener imágenes guardadas en disco.
+    Muestra el estado biométrico de todos los usuarios activos.
+    Verifica cuántas imágenes tiene cada uno en disco.
     """
-    print("\n" + "="*50)
-    print("  VERIFICACIÓN DE IMÁGENES (LBPH)")
-    print("="*50)
+    print("\n" + "="*55)
+    print("  VERIFICACIÓN DE IMÁGENES (archivos en disco)")
+    print("="*55)
 
     personas = obtener_personas()
 
@@ -54,30 +52,20 @@ def verificar_encodings():
     con_imagenes = []
 
     for id_usuario, nombre in personas:
-        if tiene_biometrico(id_usuario):
-            # Verificar que la carpeta exista y tenga imágenes
-            from db_manager import obtener_carpeta_usuario
-            carpeta = obtener_carpeta_usuario(id_usuario)
-            if os.path.isdir(carpeta):
-                imgs = [f for f in os.listdir(carpeta)
-                        if f.lower().endswith((".jpg", ".jpeg", ".png"))]
-                if imgs:
-                    con_imagenes.append((id_usuario, nombre))
-                    print(f"  ✓ {nombre:<30} (ID {id_usuario}) — {len(imgs)} imágenes")
-                else:
-                    sin_imagenes.append((id_usuario, nombre))
-                    print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Carpeta vacía")
-            else:
-                sin_imagenes.append((id_usuario, nombre))
-                print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Sin carpeta en disco")
+        carpeta = _buscar_carpeta_usuario(id_usuario)
+        if carpeta:
+            imgs = [f for f in os.listdir(carpeta)
+                    if f.lower().endswith((".jpg", ".png"))]
+            con_imagenes.append((id_usuario, nombre))
+            print(f"  ✓ {nombre:<30} (ID {id_usuario}) — {len(imgs)} imágenes en disco")
         else:
             sin_imagenes.append((id_usuario, nombre))
-            print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Sin registro biométrico")
+            print(f"  ✗ {nombre:<30} (ID {id_usuario}) — Sin imágenes en disco")
 
-    print("="*50)
-    print(f"  Con imágenes   : {len(con_imagenes)}")
-    print(f"  Sin imágenes   : {len(sin_imagenes)}")
-    print("="*50)
+    print("="*55)
+    print(f"  Con imágenes : {len(con_imagenes)}")
+    print(f"  Sin imágenes : {len(sin_imagenes)}")
+    print("="*55)
 
     if sin_imagenes:
         print("\n[AVISO] Los siguientes usuarios necesitan captura de rostro:")
@@ -87,99 +75,123 @@ def verificar_encodings():
     return sin_imagenes
 
 
-# ─── Cargar dataset de imágenes para entrenamiento ───────────────────────────
+def _buscar_carpeta_usuario(id_usuario: int) -> str | None:
+    """
+    Busca la carpeta de imágenes de un usuario en DATA_DIR.
+    La carpeta empieza con '<id_usuario>_'.
+    Retorna la ruta completa o None si no existe.
+    """
+    if not os.path.isdir(DATA_DIR):
+        return None
+    prefijo = f"{id_usuario}_"
+    for nombre in os.listdir(DATA_DIR):
+        if nombre.startswith(prefijo):
+            ruta = os.path.join(DATA_DIR, nombre)
+            if os.path.isdir(ruta):
+                return ruta
+    return None
+
+
 def cargar_dataset() -> tuple[list, list]:
     """
-    Recorre todas las carpetas de usuarios y carga sus imágenes como dataset.
-    Retorna (imagenes_grises, labels) donde:
-      - imagenes_grises: lista de arrays numpy en escala de grises (200x200)
-      - labels: lista de id_usuario (int) correspondiente a cada imagen
+    Carga todas las imágenes de todos los usuarios desde disco.
+
+    Lee cada carpeta data_rostros/<id>_<nombre>/ y carga los JPG/PNG
+    como arrays numpy en escala de grises.
+
+    Retorna (imagenes, labels):
+      - imagenes: lista de arrays numpy 200x200 escala de grises
+      - labels:   lista de id_usuario correspondiente a cada imagen
     """
-    datos = obtener_todos_encodings()   # [(id_usuario, ruta_carpeta)]
     imagenes = []
     labels   = []
 
-    for id_usuario, ruta_carpeta in datos:
-        if not ruta_carpeta or not os.path.isdir(ruta_carpeta):
-            print(f"[AVISO] Carpeta no encontrada para ID {id_usuario}: {ruta_carpeta}")
+    if not os.path.isdir(DATA_DIR):
+        print(f"[AVISO] Carpeta DATA_DIR no existe: {DATA_DIR}")
+        return imagenes, labels
+
+    for carpeta_nombre in sorted(os.listdir(DATA_DIR)):
+        ruta_carpeta = os.path.join(DATA_DIR, carpeta_nombre)
+        if not os.path.isdir(ruta_carpeta):
             continue
 
-        archivos = [f for f in os.listdir(ruta_carpeta)
-                    if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        try:
+            id_usuario = int(carpeta_nombre.split("_")[0])
+        except ValueError:
+            print(f"[AVISO] Carpeta con nombre inesperado, se omite: {carpeta_nombre}")
+            continue
+
+        archivos = sorted([
+            f for f in os.listdir(ruta_carpeta)
+            if f.lower().endswith((".jpg", ".png"))
+        ])
 
         if not archivos:
-            print(f"[AVISO] Sin imágenes en carpeta de ID {id_usuario}")
+            print(f"[AVISO] Carpeta vacía para ID {id_usuario}: {ruta_carpeta}")
             continue
 
         for archivo in archivos:
             ruta_img = os.path.join(ruta_carpeta, archivo)
             img = cv2.imread(ruta_img, cv2.IMREAD_GRAYSCALE)
             if img is None:
+                print(f"[AVISO] No se pudo leer: {ruta_img}")
                 continue
-            # Normalizar tamaño para consistencia en el histograma LBP
             img_res = cv2.resize(img, FACE_SIZE)
             imagenes.append(img_res)
-            labels.append(id_usuario)   # label = id_usuario (entero)
+            labels.append(id_usuario)
 
-    print(f"[INFO] Dataset cargado: {len(imagenes)} imágenes de {len(set(labels))} usuarios.")
+    usuarios_unicos = len(set(labels)) if labels else 0
+    print(f"[INFO] Dataset cargado: {len(imagenes)} imágenes de {usuarios_unicos} usuarios.")
     return imagenes, labels
 
 
-# ─── Entrenar modelo LBPH ────────────────────────────────────────────────────
 def entrenar() -> bool:
     """
-    Entrena el reconocedor LBPH con todas las imágenes disponibles.
-    Guarda el modelo en MODELO_LBPH para que ReconocimientoFacial.py lo cargue.
-
-    LBPH (Local Binary Patterns Histogram):
-      - radius=1      → radio del patrón LBP (vecinos a 1 px de distancia)
-      - neighbors=8   → 8 vecinos por punto
-      - grid_x=8      → 8 celdas horizontales para el histograma
-      - grid_y=8      → 8 celdas verticales para el histograma
-      - threshold=∞   → sin umbral interno (lo manejamos nosotros al predecir)
+    Entrena el reconocedor LBPH con las imágenes almacenadas en disco.
+    Guarda el modelo resultante en modelo_lbph.xml.
     """
     imagenes, labels = cargar_dataset()
 
     if not imagenes:
-        print("[ERROR] No hay imágenes para entrenar. Captura rostros primero.")
-        return False
-
-    if len(set(labels)) < 1:
-        print("[ERROR] Se necesita al menos 1 usuario con imágenes.")
+        print("[ERROR] No hay imágenes en disco para entrenar.")
         return False
 
     print(f"[INFO] Entrenando LBPH con {len(imagenes)} imágenes...")
 
-    # Crear el reconocedor LBPH
-    # cv2.face.LBPHFaceRecognizer_create() requiere opencv-contrib-python
     recognizer = cv2.face.LBPHFaceRecognizer_create(
         radius=1,
         neighbors=8,
         grid_x=8,
         grid_y=8
     )
-
-    # El entrenamiento asigna a cada histograma LBP su label correspondiente
     recognizer.train(imagenes, np.array(labels, dtype=np.int32))
-
-    # Guardar en disco para que el sistema de acceso lo cargue al iniciar
     recognizer.save(MODELO_LBPH)
-    print(f"[OK] Modelo guardado en: {MODELO_LBPH}")
+
+    # ── CAMBIO 3: verificar que el archivo realmente quedó guardado ──────────
+    if os.path.exists(MODELO_LBPH):
+        tamaño = os.path.getsize(MODELO_LBPH)
+        print(f"[OK] Modelo guardado y verificado en: {MODELO_LBPH} ({tamaño} bytes)")
+    else:
+        print(f"[ERROR] El archivo NO se guardó en: {MODELO_LBPH}")
+        return False
+
     print(f"[OK] {len(set(labels))} usuario(s) en el modelo.")
     return True
 
 
-# ─── Cargar modelo en memoria (para ReconocimientoFacial.py) ─────────────────
 def cargar_modelo_lbph():
     """
     Carga el modelo LBPH desde disco.
-    Llamado internamente por ReconocimientoFacial.py al iniciar.
-    Retorna el reconocedor, o None si no existe el archivo.
+    Llamado por ReconocimientoFacial.py al iniciar.
     """
     if not os.path.exists(MODELO_LBPH):
         print(f"[AVISO] Modelo LBPH no encontrado: {MODELO_LBPH}")
-        print("[INFO] Ejecuta entrenadoRF.py para generar el modelo.")
+        print("[INFO] Ejecuta entrenadoRF.py para generarlo.")
         return None
+
+    # ── CAMBIO 2: mostrar tamaño del archivo al cargarlo ────────────────────
+    tamaño = os.path.getsize(MODELO_LBPH)
+    print(f"[INFO] Modelo encontrado ({tamaño} bytes). Cargando...")
 
     recognizer = cv2.face.LBPHFaceRecognizer_create()
     recognizer.read(MODELO_LBPH)
@@ -187,24 +199,16 @@ def cargar_modelo_lbph():
     return recognizer
 
 
-# ─── Compatibilidad: función que antes cargaba encodings en RAM ───────────────
 def cargar_encodings_bd():
-    """
-    Mantiene la firma original para compatibilidad.
-    Con LBPH, los 'encodings' son el modelo ya entrenado, no vectores en RAM.
-    Retorna (recognizer, ids_list) donde ids_list viene de la BD.
-    """
     recognizer = cargar_modelo_lbph()
     datos      = obtener_todos_encodings()
     ids_list   = [id_u for id_u, _ in datos]
     return recognizer, ids_list
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     solo_verificar = "--check" in sys.argv
-
-    sin_imagenes = verificar_encodings()
+    sin_imagenes   = verificar_encodings()
 
     if solo_verificar:
         sys.exit(0)
@@ -218,6 +222,6 @@ if __name__ == "__main__":
         if ok:
             print("\n[LISTO] El modelo está listo. Puedes correr ReconocimientoFacial.py")
         else:
-            print("\n[ERROR] No se pudo entrenar. Revisa los mensajes anteriores.")
+            print("\n[ERROR] No se pudo entrenar.")
     else:
         print("[INFO] Entrenamiento omitido.")

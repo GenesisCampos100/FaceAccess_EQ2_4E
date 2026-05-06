@@ -62,12 +62,12 @@ def matricula_existe(matricula: str) -> bool:
 def crear_detector():
     """
     Crea el detector de rostros con Haar Cascade.
-    Es un método clásico, sin IA ni redes neuronales.
+    Es un método clásico, ni redes neuronales.
     """
     detector = cv2.CascadeClassifier(HAAR_CASCADE)
     if detector.empty():
         raise RuntimeError(f"No se pudo cargar Haar Cascade: {HAAR_CASCADE}")
-    print(f"[INFO] Detector: Haar Cascade (sin IA)")
+    print(f"[INFO] Detector: Haar Cascade")
     return detector
 
 
@@ -298,7 +298,7 @@ def crear_admin(datos: dict, carpeta_rostros: str) -> int:
 
 def main():
     print("\n" + "="*50)
-    print("  FACEACCESS — SETUP INICIAL (sin IA)")
+    print("  FACEACCESS — SETUP INICIAL")
     print("="*50)
 
     if ya_existe_admin():
