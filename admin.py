@@ -213,6 +213,14 @@ def capturar_rostro(id_usuario: int, nombre_completo: str) -> str | None:
             # Recortar y normalizar el rostro
             rostro_crop = gray[y:y+h, x:x+w]
             rostro_res  = cv2.resize(rostro_crop, FACE_SIZE)
+            
+            # ─── Preprocesamiento CLAHE (igual a ReconocimientoFacial.py) ──────────────
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            rostro_res = clahe.apply(rostro_res)
+            # Filtro bilateral: preserva bordes mientras suaviza ruido
+            rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+            # Normalización de intensidad (0-255)
+            rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
 
             # Guardar imagen
             ruta_img = os.path.join(carpeta, f"rostro_{capturadas:03d}.jpg")

@@ -120,6 +120,25 @@ def obtener_usuario_por_matricula(matricula: str):
         ).fetchone()
 
 
+def obtener_usuario_por_nombre(nombre: str, apellido_p: str, apellido_m: str = ""):
+    """
+    Busca si una persona ya está registrada por nombre y apellidos.
+    Retorna la fila del usuario si existe, o None.
+    Convierte todos los nombres a mayúsculas para búsqueda consistente.
+    """
+    nombre = nombre.upper() if nombre else ""
+    apellido_p = apellido_p.upper() if apellido_p else ""
+    apellido_m = apellido_m.upper() if apellido_m else ""
+    
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT u.*, r.nombre_rol FROM usuarios u "
+            "JOIN roles r ON r.id_rol = u.id_rol "
+            "WHERE u.nombre = ? AND u.apellido_p = ? AND u.apellido_m = ? AND u.estatus = 1",
+            (nombre, apellido_p, apellido_m)
+        ).fetchone()
+
+
 def obtener_personal_autorizado() -> list:
     """Retorna lista de todos los usuarios activos con rol PERSONAL_AUTORIZADO."""
     with get_connection() as conn:

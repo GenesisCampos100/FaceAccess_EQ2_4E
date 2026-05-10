@@ -99,7 +99,7 @@ def capturar(usuario):
 
     capturadas = 0
     print(f"[INFO] Capturando {FOTOS_OBJETIVO} imágenes del rostro.")
-    print("[INFO] Mira de frente a la cámara. Mueve ligeramente la cabeza.")
+    print("[INFO] Mira de frente a la cámara.")
     print("[INFO] Presiona ESC para cancelar.")
 
     while capturadas < FOTOS_OBJETIVO:
@@ -129,6 +129,16 @@ def capturar(usuario):
 
             # Normalizar tamaño (LBPH requiere imágenes del mismo tamaño)
             rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
+            
+            # ─── Preprocesamiento mejorado para robustez ante iluminación ───────────
+            # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            # Es superior a equalizeHist porque adapta localmente y limita contraste
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            rostro_res = clahe.apply(rostro_res)
+            # Filtro bilateral: preserva bordes mientras suaviza ruido
+            rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+            # Normalización de intensidad (0-255)
+            rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
 
             # Guardar imagen en disco
             ruta_img = os.path.join(carpeta, f"rostro_{capturadas:03d}.jpg")

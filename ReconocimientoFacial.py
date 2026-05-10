@@ -23,6 +23,7 @@ from datetime import datetime
 from db_manager import (
     obtener_usuario_por_id,
     obtener_usuario_por_matricula,
+    obtener_usuario_por_nombre,
     tiene_entrada_abierta,
     registrar_entrada,
     registrar_salida,
@@ -97,9 +98,10 @@ def buscar(rostro_gray, recognizer):
 
     Proceso:
       1. Normalizar el rostro al tamaño de entrenamiento (FACE_SIZE).
-      2. Llamar a recognizer.predict() que calcula la distancia chi-cuadrado
+      2. Aplicar preprocesamiento CLAHE + bilateral para robustez ante iluminación.
+      3. Llamar a recognizer.predict() que calcula la distancia chi-cuadrado
          entre el histograma LBP del rostro y los del modelo.
-      3. Retornar (id_usuario, confianza).
+      4. Retornar (id_usuario, confianza).
          · confianza < UMBRAL_CONFIANZA → identidad válida
          · confianza >= UMBRAL_CONFIANZA → desconocido
 
@@ -112,6 +114,15 @@ def buscar(rostro_gray, recognizer):
 
     # Normalizar al tamaño de entrenamiento
     rostro_res = cv2.resize(rostro_gray, FACE_SIZE)
+    
+    # ─── Preprocesamiento mejorado (IGUAL al de entrenamiento) ──────────────
+    # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    rostro_res = clahe.apply(rostro_res)
+    # Filtro bilateral: preserva bordes mientras suaviza ruido
+    rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+    # Normalización de intensidad (0-255)
+    rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
 
     # Predecir: label = id_usuario asignado al entrenar; confianza = distancia
     label, confianza = recognizer.predict(rostro_res)
@@ -306,13 +317,7 @@ class FaceAccess(ctk.CTk):
 
             # Predecir con LBPH
             if rostro_gray.size > 0:
-                rostro_res = cv2.resize(rostro_gray, FACE_SIZE)
-
-                # MISMO preprocesamiento que en entrenamiento
-                rostro_res = cv2.equalizeHist(rostro_res)
-                rostro_res = cv2.GaussianBlur(rostro_res, (3,3), 0)
-
-                id_u, confianza = buscar(rostro_res, self._recognizer)
+                id_u, confianza = buscar(rostro_gray, self._recognizer)
             else:
                 id_u, confianza = None, 999
 
@@ -704,6 +709,7 @@ class FaceAccess(ctk.CTk):
             
             
             command=self._abrir_login
+
             
             
             
@@ -1033,6 +1039,7 @@ class FaceAccess(ctk.CTk):
         self._login_validando = False
         self._login_frames_confirmados = 0
         self._login_frames_fallidos = 0
+        self._login_intentos_totales = 0  # Contador de intentos totales para feedback
         self.entry_mat_l.delete(0, "end")
         self.entry_pass_l.delete(0, "end")
         self.lbl_login_msg.configure(text="")
@@ -1046,6 +1053,9 @@ class FaceAccess(ctk.CTk):
         """
         Valida credenciales y luego confirma identidad con LBPH.
         """
+
+        self._login_intentos = 0
+        self._login_max_intentos = 3
         self.btn_login_confirmar.configure(state="disabled")
         mat  = self.entry_mat_l.get().strip()
         cont = self.entry_pass_l.get().strip()
@@ -1150,8 +1160,9 @@ class FaceAccess(ctk.CTk):
             )
 
             if self._login_frames_fallidos >= frames_fallo:
+
                 self.lbl_login_status.configure(
-                    text="✗ Rostro no coincide",
+                    text="✗ Rostro no coincide. Reintentando...",
                     text_color=C_ERROR
                 )
 
@@ -1166,11 +1177,19 @@ class FaceAccess(ctk.CTk):
                     id_usuario=self._login_usuario["id_usuario"]
                 )
 
-                self._login_validando = False
-                self.after(2000, lambda: self._resetear_login_form())
+                # Reiniciar contadores
+                self._login_frames_confirmados = 0
+                self._login_frames_fallidos = 0
+
+                # Esperar antes de reintentar
+                self.after(
+                    2500,
+                    lambda: self._validar_rostro_login_con_video(matricula)
+                )
+
                 return
 
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula))
+            self.after(120, lambda: self._validar_rostro_login_con_video(matricula))
             return
 
         # Si el rostro SÍ coincide, incrementar contador
@@ -1482,10 +1501,9 @@ class FaceAccess(ctk.CTk):
         self._modo = "captura"
         self._cap_imagenes = []
         self._coincidencias = []
+        # OPTIMIZADO: Solo captura frontal, eliminadas posiciones laterales
         self._etapas_captura = [
-            {"nombre": "Frente", "mensaje": "Mira al frente", "fotos": 10},
-            {"nombre": "Izquierda", "mensaje": "Gira ligeramente a la izquierda", "fotos": 10},
-            {"nombre": "Derecha", "mensaje": "Gira ligeramente a la derecha", "fotos": 10},
+            {"nombre": "Frente", "mensaje": "Mira al frente hacia la cámara", "fotos": 30},
         ]
         self._etapa_actual = 0
         self._foto_actual = 0
@@ -1633,25 +1651,37 @@ class FaceAccess(ctk.CTk):
             rostro_crop = small[y1:y2, x1:x2]
             if rostro_crop.size > 0:
                 rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
-                rostro_res = cv2.equalizeHist(rostro_res)
-                rostro_res = cv2.GaussianBlur(rostro_res, (3, 3), 0)
+                # ─── Preprocesamiento mejorado para robustez ante iluminación ───────────
+                # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+                # Es superior a equalizeHist porque adapta localmente y limita contraste
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                rostro_res = clahe.apply(rostro_res)
+                # Filtro bilateral: preserva bordes mientras suaviza ruido
+                rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+                # Normalización de intensidad (0-255)
+                rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
 
                 # Validar duplicados solo si el rostro está bien posicionado
+                # Se valida desde la foto 15 para tener suficiente confianza con 30 fotos
                 if self._recognizer is not None and self._cap_count >= 15 and rostro_bien_posicionado:
                     try:
                         id_existente, confianza = buscar(rostro_res, self._recognizer)
                         
-                        if id_existente is not None and confianza < 55:
+                        # Umbral MÁS ESTRICTO para duplicados: < 40 (evitar falsos positivos)
+                        # < 40: Rostro MUY similar (probable duplicado)
+                        # 40-70: Similar pero podría ser usuario nuevo con características parecidas
+                        # > 70: Rostro desconocido (usuario nuevo)
+                        if id_existente is not None and confianza < 40:
                             self._coincidencias.append(id_existente)
 
-                        # Detectar duplicado real
-                        if len(self._coincidencias) >= 5:
+                        # Detectar duplicado real: 5+ coincidencias en 7 muestras (más restrictivo)
+                        if len(self._coincidencias) >= 7:
                             id_mas_repetido = max(
                                 set(self._coincidencias),
                                 key=self._coincidencias.count
                             )
 
-                            if self._coincidencias.count(id_mas_repetido) >= 4:
+                            if self._coincidencias.count(id_mas_repetido) >= 5:
                                 usuario_existente = obtener_usuario_por_id(id_mas_repetido)
                                 nombre_existente = "Usuario existente"
                                 if usuario_existente:
@@ -1672,8 +1702,8 @@ class FaceAccess(ctk.CTk):
                     except Exception as e:
                         print(f"[VALIDACIÓN ROSTRO] {e}")
 
-                # CAPTURAR: Solo si está bien posicionado durante 3+ frames seguidos
-                if self._rostro_detectado_frames >= 3:
+                # CAPTURAR: Solo si está bien posicionado durante 2+ frames seguidos (optimizado)
+                if self._rostro_detectado_frames >= 2:
                     self._cap_imagenes.append(rostro_res)
                     self._foto_actual += 1
                     self._cap_count += 1
@@ -1686,7 +1716,7 @@ class FaceAccess(ctk.CTk):
                         text_color=C_OK
                     )
 
-                    # Cambiar a siguiente etapa
+                    # Cambiar a siguiente etapa (solo hay 1: Frente)
                     if self._foto_actual >= etapa["fotos"]:
                         self._etapa_actual += 1
                         self._foto_actual = 0
@@ -1694,21 +1724,9 @@ class FaceAccess(ctk.CTk):
                         if self._etapa_actual >= len(self._etapas_captura):
                             self.after(100, self._finalizar_registro)
                             return
-                        else:
-                            # Pausa entre etapas
-                            self.lbl_cap_instruc.configure(
-                                text="Preparándose para la siguiente posición...",
-                                text_color=C_WARN
-                            )
-                            self.lbl_cap_estado.configure(
-                                text=self._etapas_captura[self._etapa_actual]["mensaje"],
-                                text_color=C_OK
-                            )
-                            self.after(1500, self._loop_captura)
-                            return
 
-                    # Pausa entre capturas
-                    self.after(500, self._loop_captura)
+                    # Pausa entre capturas (400ms para balance velocidad-calidad con 30 fotos)
+                    self.after(400, self._loop_captura)
                     return
         else:
             self._rostro_detectado_frames = 0
@@ -1723,6 +1741,38 @@ class FaceAccess(ctk.CTk):
 
         self.after(80, self._loop_captura)
 
+    def _validar_rostro_duplicado(self):
+        """
+        Verifica si el rostro capturado ya existe en el modelo LBPH.
+        Compara las imágenes capturadas contra el modelo actual.
+        Usa umbral restrictivo (40) para evitar falsos positivos en usuarios nuevos.
+        Retorna (es_duplicado, id_usuario_existente, confianza_minima)
+        """
+        if not self._cap_imagenes or self._recognizer is None:
+            return False, None, 999.0
+        
+        # Comparar cada imagen capturada contra el modelo
+        confianza_minima = 999.0
+        id_duplicado = None
+        UMBRAL_DUPLICADO_ESTRICTO = 40  # Más restrictivo que UMBRAL_CONFIANZA (70)
+        
+        for img_gray in self._cap_imagenes:
+            # Normalizar al tamaño de entrenamiento
+            rostro_res = cv2.resize(img_gray, FACE_SIZE)
+            
+            # Predecir contra el modelo actual
+            label, confianza = self._recognizer.predict(rostro_res)
+            
+            # Si confianza es MUCHO más baja (< 40), significa rostro MUY similar (duplicado real)
+            if confianza < UMBRAL_DUPLICADO_ESTRICTO:
+                if confianza < confianza_minima:
+                    confianza_minima = confianza
+                    id_duplicado = label
+        
+        # Si encontró similitud REAL (confianza muy baja), es un duplicado
+        es_duplicado = confianza_minima < UMBRAL_DUPLICADO_ESTRICTO
+        return es_duplicado, id_duplicado, confianza_minima
+
     def _finalizar_registro(self):
         """
         Guarda el nuevo usuario y re-entrena el modelo LBPH.
@@ -1731,6 +1781,23 @@ class FaceAccess(ctk.CTk):
         self.lbl_cap_estado.configure(text="Procesando...", text_color=C_WARN)
         self.update()
         try:
+            # Validar que el rostro no sea duplicado
+            es_duplicado, id_dup, conf_dup = self._validar_rostro_duplicado()
+            if es_duplicado:
+                usuario_dup = obtener_usuario_por_id(id_dup)
+                nombre_dup = f"{usuario_dup['nombre']} {usuario_dup['apellido_p']}" if usuario_dup else f"Usuario ID {id_dup}"
+                self.lbl_cap_estado.configure(
+                    text=f"✗ Rostro duplicado detectado ({nombre_dup}).",
+                    text_color=C_ERROR
+                )
+                self.lbl_cap_instruc.configure(
+                    text="Este rostro ya está registrado en el sistema.",
+                    text_color=C_ERROR
+                )
+                # Limpiar datos y volver a modo acceso
+                self.after(3000, self._cancelar_modo)
+                return
+            
             # Registrar usuario (ahora con transacción en db_manager)
             id_u = registrar_usuario(
                 nombre=self._reg_datos["nombre"],
