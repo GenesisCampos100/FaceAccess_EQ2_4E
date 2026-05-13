@@ -126,8 +126,8 @@ def pedir_datos() -> dict:
 
     while True:
         contrasenia = input("Contraseña        : ").strip()
-        if len(contrasenia) < 4:
-            print("[!] La contraseña debe tener al menos 4 caracteres.")
+        if len(contrasenia) < 6:
+            print("[!] La contraseña debe tener al menos 6GE caracteres.")
             continue
         confirmacion = input("Confirmar contraseña: ").strip()
         if contrasenia != confirmacion:
@@ -210,9 +210,13 @@ def capturar_rostro(id_usuario: int, nombre_completo: str) -> str | None:
             x, y, w, h = rostro_coords
             x, y, w, h = x*esc, y*esc, w*esc, h*esc
 
-            # Recortar y normalizar el rostro
             rostro_crop = gray[y:y+h, x:x+w]
             rostro_res  = cv2.resize(rostro_crop, FACE_SIZE)
+
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            rostro_res = clahe.apply(rostro_res)
+            rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+            rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
 
             # Guardar imagen
             ruta_img = os.path.join(carpeta, f"rostro_{capturadas:03d}.jpg")

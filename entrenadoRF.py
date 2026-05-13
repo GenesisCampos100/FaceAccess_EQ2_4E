@@ -146,57 +146,67 @@ def cargar_dataset() -> tuple[list, list]:
 
 
 def entrenar() -> bool:
-    """
-    Entrena el reconocedor LBPH con las imágenes almacenadas en disco.
-    Guarda el modelo resultante en modelo_lbph.xml.
-    """
+    print(f"[LBPH] Iniciando entrenamiento...")
     imagenes, labels = cargar_dataset()
 
     if not imagenes:
-        print("[ERROR] No hay imágenes en disco para entrenar.")
+        print("[ERROR] No hay imágenes para entrenar. Captura rostros primero.")
         return False
 
-    print(f"[INFO] Entrenando LBPH con {len(imagenes)} imágenes...")
-
-    recognizer = cv2.face.LBPHFaceRecognizer_create(
-        radius=1,
-        neighbors=8,
-        grid_x=8,
-        grid_y=8
-    )
-    recognizer.train(imagenes, np.array(labels, dtype=np.int32))
-    recognizer.save(MODELO_LBPH)
-
-    # ── CAMBIO 3: verificar que el archivo realmente quedó guardado ──────────
-    if os.path.exists(MODELO_LBPH):
-        tamaño = os.path.getsize(MODELO_LBPH)
-        print(f"[OK] Modelo guardado y verificado en: {MODELO_LBPH} ({tamaño} bytes)")
-    else:
-        print(f"[ERROR] El archivo NO se guardó en: {MODELO_LBPH}")
+    if len(set(labels)) < 1:
+        print("[ERROR] Se necesita al menos 1 usuario con imágenes.")
         return False
 
-    print(f"[OK] {len(set(labels))} usuario(s) en el modelo.")
-    return True
+    usuarios_unicos = len(set(labels))
+    print(f"[LBPH] Cargadas {len(imagenes)} imágenes de {usuarios_unicos} usuario(s)")
 
+    try:
+        recognizer = cv2.face.LBPHFaceRecognizer_create(
+            radius=1, neighbors=8, grid_x=8, grid_y=8)
+        print(f"[LBPH] Reconocedor LBPH creado")
+    except Exception as e:
+        print(f"[ERROR] Error creando reconocedor LBPH: {e}")
+        return False
+
+    try:
+        recognizer.train(imagenes, np.array(labels, dtype=np.int32))
+        print(f"[LBPH] ✓ Entrenamiento completado")
+    except Exception as e:
+        print(f"[ERROR] Error durante el entrenamiento: {e}")
+        return False
+
+    try:
+        recognizer.save(MODELO_LBPH)
+        if os.path.exists(MODELO_LBPH):
+            tamaño = os.path.getsize(MODELO_LBPH)
+            print(f"[LBPH] ✓ Modelo guardado y verificado ({tamaño} bytes)")
+        else:
+            print(f"[ERROR] Archivo NO se guardó en {MODELO_LBPH}")
+            return False
+        print(f"[LBPH] ✓ {usuarios_unicos} usuario(s) en el modelo")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Error guardando modelo: {e}")
+        return False
 
 def cargar_modelo_lbph():
-    """
-    Carga el modelo LBPH desde disco.
-    Llamado por ReconocimientoFacial.py al iniciar.
-    """
+    print(f"[LBPH] Cargando modelo desde: {MODELO_LBPH}")
+
     if not os.path.exists(MODELO_LBPH):
-        print(f"[AVISO] Modelo LBPH no encontrado: {MODELO_LBPH}")
+        print(f"[ERROR] Modelo LBPH no encontrado: {MODELO_LBPH}")
         print("[INFO] Ejecuta entrenadoRF.py para generarlo.")
         return None
 
-    # ── CAMBIO 2: mostrar tamaño del archivo al cargarlo ────────────────────
-    tamaño = os.path.getsize(MODELO_LBPH)
-    print(f"[INFO] Modelo encontrado ({tamaño} bytes). Cargando...")
-
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(MODELO_LBPH)
-    print(f"[INFO] Modelo LBPH cargado desde: {MODELO_LBPH}")
-    return recognizer
+    try:
+        tamaño = os.path.getsize(MODELO_LBPH)
+        print(f"[LBPH] Archivo encontrado ({tamaño} bytes)")
+        recognizer = cv2.face.LBPHFaceRecognizer_create()
+        recognizer.read(MODELO_LBPH)
+        print(f"[LBPH] ✓ Modelo cargado en memoria")
+        return recognizer
+    except Exception as e:
+        print(f"[ERROR] Error cargando modelo LBPH: {e}")
+        return None
 
 
 def cargar_encodings_bd():

@@ -110,6 +110,11 @@ def capturar(usuario):
             rostro_crop = gray[y:y+h, x:x+w]
             rostro_res  = cv2.resize(rostro_crop, FACE_SIZE)
 
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            rostro_res = clahe.apply(rostro_res)
+            rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+            rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
+
             imagenes.append(rostro_res)
             capturadas += 1
 

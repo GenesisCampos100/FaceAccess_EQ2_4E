@@ -76,7 +76,7 @@ H_VIDEO  = 800 - H_HEADER - H_SALUDO
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  FUNCIONES DE RECONOCIMIENTO 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════ ════════════
 
 def cargar_encodings():
     """
@@ -109,10 +109,13 @@ def buscar(rostro_gray, recognizer):
     if recognizer is None:
         return None, 999.0
 
-    # Normalizar al tamaño de entrenamiento
     rostro_res = cv2.resize(rostro_gray, FACE_SIZE)
 
-    # Predecir: label = id_usuario asignado al entrenar; confianza = distancia
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    rostro_res = clahe.apply(rostro_res)
+    rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+    rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
+
     label, confianza = recognizer.predict(rostro_res)
 
     if confianza < UMBRAL_CONFIANZA:
@@ -131,7 +134,7 @@ class FaceAccess(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         self.title("FaceAccess")
-        self.geometry("480x600")  # Cambiar 600 → 800 para Raspberry 7"
+        self.geometry("400x600")  # Cambiar 480 X 800 para Raspberry 7"
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
 
@@ -197,7 +200,7 @@ class FaceAccess(ctk.CTk):
         self._build_video()
         self._build_overlays()
 
-        # Inicializar detector Haar Cascade (reemplaza YuNet)
+        # Inicializar detector Haar Cascade 
         self._detector = self._init_haar()
         self._update_clock()
         self._pulso()
@@ -413,8 +416,8 @@ class FaceAccess(ctk.CTk):
         if b_s <= top_s or r_s <= l_s:
             return frame
 
-        colores = {
-            "escaneando" : (180, 180, 180),
+        colores = { 
+            "escaneando" : (180, 180, 180),  
             "verificando": (0,   212, 170),
             "exito"      : (0,   212, 170),
             "salida"     : (35,  166, 245),
@@ -937,7 +940,7 @@ class FaceAccess(ctk.CTk):
         self._np_val = ""; self.lbl_np.configure(text="")
         self._en_pausa = True; self._np_vis = True
         self._ocultar_msg()
-        self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1) 
 
     def _np_press(self, t):
         if len(self._np_val) < 15:
@@ -1324,6 +1327,11 @@ class FaceAccess(ctk.CTk):
         self.lbl_cap_cnt.pack(pady=6)
         self.lbl_cap_estado = ctk.CTkLabel(self.ov_captura, text="",
                                             font=("Helvetica", 12, "bold"), text_color=C_OK)
+        
+        self.lbl_cap_instruc = ctk.CTkLabel(self.ov_captura, text="",
+                                     font=("Helvetica", 11), text_color=C_WARN)
+        self.lbl_cap_instruc.pack(pady=(0, 4))
+        
         self.lbl_cap_estado.pack(pady=2)
         ctk.CTkButton(self.ov_captura, text="Cancelar", fg_color="transparent",
                        text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 12),
@@ -1447,11 +1455,11 @@ class FaceAccess(ctk.CTk):
                 if self._recognizer is not None and self._cap_count >= 15 and rostro_bien_posicionado:
                     try:
                         id_existente, confianza = buscar(rostro_res, self._recognizer)
-                        if id_existente is not None and confianza < 55:
+                        if id_existente is not None and confianza < 40:
                             self._coincidencias.append(id_existente)
-                        if len(self._coincidencias) >= 5:
+                        if len(self._coincidencias) >= 7:
                             id_rep = max(set(self._coincidencias), key=self._coincidencias.count)
-                            if self._coincidencias.count(id_rep) >= 4:
+                            if self._coincidencias.count(id_rep) >= 5: 
                                 u_dup = obtener_usuario_por_id(id_rep)
                                 nombre_dup = f"{u_dup['nombre']} {u_dup['apellido_p']}" if u_dup else "Usuario existente"
                                 print(f"[DUPLICADO] Rostro ya registrado: {nombre_dup}")
@@ -1494,14 +1502,47 @@ class FaceAccess(ctk.CTk):
         self.lbl_cap_estado.configure(text=etapa["mensaje"], text_color=estado_color)
         self.lbl_cap_instruc.configure(text=instruccion, text_color=estado_color)
         self.after(80, self._loop_captura)
+
+
+    def _validar_rostro_duplicado(self):
+        """
+        Verifica si el rostro capturado ya existe en el modelo LBPH.
+        Retorna (es_duplicado, id_usuario_existente, confianza_minima)
+        """
+        if not self._cap_imagenes or self._recognizer is None:
+            return False, None, 999.0
+
+        confianza_minima = 999.0
+        id_duplicado = None
+        UMBRAL_DUPLICADO_ESTRICTO = 40
+
+        for img_gray in self._cap_imagenes:
+            rostro_res = cv2.resize(img_gray, FACE_SIZE)
+            label, confianza = self._recognizer.predict(rostro_res)
+
+            if confianza < UMBRAL_DUPLICADO_ESTRICTO:
+                if confianza < confianza_minima:
+                    confianza_minima = confianza
+                    id_duplicado = label
+
+        es_duplicado = confianza_minima < UMBRAL_DUPLICADO_ESTRICTO
+        return es_duplicado, id_duplicado, confianza_minima
+    
     def _finalizar_registro(self):
-        """
-        Guarda el nuevo usuario, escribe las imágenes en disco,
-        registra el metadato en BD y re-entrena el modelo LBPH.
-        """
         self.lbl_cap_estado.configure(text="Procesando...", text_color=C_WARN)
         self.update()
         try:
+            # Validar duplicado antes de tocar la BD
+            es_duplicado, id_dup, conf_dup = self._validar_rostro_duplicado()
+            if es_duplicado:
+                usuario_dup = obtener_usuario_por_id(id_dup)
+                nombre_dup = f"{usuario_dup['nombre']} {usuario_dup['apellido_p']}" if usuario_dup else f"Usuario ID {id_dup}"
+                self.lbl_cap_estado.configure(
+                    text=f"✗ Rostro duplicado: {nombre_dup}.", text_color=C_ERROR)
+                self.after(3000, self._cancelar_modo)
+                return
+
+            # Registrar usuario
             id_u = registrar_usuario(
                 nombre=self._reg_datos["nombre"],
                 apellido_p=self._reg_datos["apellido_p"],
@@ -1513,18 +1554,34 @@ class FaceAccess(ctk.CTk):
                 grupo=self._reg_datos.get("grupo", "")
             )
 
-            # Crear carpeta en disco para las imágenes del nuevo usuario
+            if not id_u:
+                raise Exception("No se pudo obtener ID del nuevo usuario")
+
+            # Crear carpeta
             nom_carpeta = f"{self._reg_datos['nombre']}_{self._reg_datos['apellido_p']}"
             carpeta = os.path.join(DATA_DIR, f"{id_u}_{nom_carpeta}")
-            os.makedirs(carpeta, exist_ok=True)
+            try:
+                os.makedirs(carpeta, exist_ok=True)
+            except Exception as e:
+                raise Exception(f"Error creando carpeta: {e}")
 
-            # Guardar cada imagen capturada como JPG en disco
+            # Guardar imágenes
+            if not self._cap_imagenes:
+                raise Exception("No hay imágenes capturadas")
+
             for idx, img_gray in enumerate(self._cap_imagenes):
-                ruta_img = os.path.join(carpeta, f"rostro_{idx:03d}.jpg")
-                cv2.imwrite(ruta_img, img_gray)
+                try:
+                    ruta_img = os.path.join(carpeta, f"rostro_{idx:03d}.jpg")
+                    if not cv2.imwrite(ruta_img, img_gray):
+                        raise Exception(f"Error escribiendo imagen {idx}")
+                except Exception as e:
+                    raise Exception(f"Error guardando imagen {idx}: {e}")
 
-            # Registrar METADATO en BD: solo la ruta de la carpeta
-            guardar_encoding(id_u, carpeta)
+            # Guardar encoding
+            try:
+                guardar_encoding(id_u, carpeta)
+            except Exception as e:
+                raise Exception(f"Error guardando encoding: {e}")
 
             nom_reg = f"{self._reg_datos['nombre']} {self._reg_datos['apellido_p']}"
             print(f"[BD] Registrado: {nom_reg} (ID {id_u}), {len(self._cap_imagenes)} imágenes")
@@ -1533,25 +1590,33 @@ class FaceAccess(ctk.CTk):
             self.update()
 
             def _reentrenar():
-                ok = entrenar()
-                if ok:
-                    nuevo_rec = cargar_modelo_lbph()
-                    with self._lock:
-                        self._recognizer = nuevo_rec
+                try:
+                    ok = entrenar()
+                    if ok:
+                        nuevo_rec = cargar_modelo_lbph()
+                        with self._lock:
+                            self._recognizer = nuevo_rec
+                        self.lbl_cap_estado.configure(
+                            text=f"✓ {nom_reg} registrado", text_color=C_OK)
+                        print(f"[LBPH] Modelo re-entrenado con {nom_reg}.")
+                    else:
+                        self.lbl_cap_estado.configure(
+                            text="Registrado. Re-entrena LBPH manualmente.", text_color=C_WARN)
+                except Exception as e:
                     self.lbl_cap_estado.configure(
-                        text=f"✓ {nom_reg} registrado", text_color=C_OK)
-                    print(f"[LBPH] Modelo re-entrenado con {nom_reg}.")
-                else:
-                    self.lbl_cap_estado.configure(
-                        text="Registrado. Re-entrena LBPH manualmente.", text_color=C_WARN)
+                        text="Registrado. Error en entrenamiento.", text_color=C_WARN)
+                    print(f"[ERROR] Re-entrenamiento: {e}")
 
             import threading as _t
             _t.Thread(target=_reentrenar, daemon=True).start()
             self.after(2000, self._cancelar_modo)
 
         except Exception as e:
-            print(f"[ERROR] {e}")
-            self.lbl_cap_estado.configure(text=f"Error: {e}", text_color=C_ERROR)
+            error_msg = str(e)
+            print(f"[ERROR REGISTRO] {error_msg}")
+            self.lbl_cap_estado.configure(text=f"Error: {error_msg}", text_color=C_ERROR)
+            print(f"[INFO] Transacción cancelada. No se registró el usuario.")
+            self.after(3000, lambda: self.lbl_cap_estado.configure(text="", text_color=C_TXT2))
 
     # ── Overlays y estado ─────────────────────────────────────────────────────
 
@@ -1608,7 +1673,9 @@ class FaceAccess(ctk.CTk):
             text="Buenos días ☀️" if h < 12 else "Buenas tardes 🌤" if h < 19 else "Buenas noches 🌙")
         self.after(1000, self._update_clock)
 
-    # ── Teclado virtual táctil ────────────────
+
+
+   # ── Teclado virtual táctil ────────────────
 
     def _abrir_teclado(self, entry_target):
         if hasattr(self, "_ov_teclado") and self._ov_teclado.winfo_ismapped():
@@ -1621,7 +1688,7 @@ class FaceAccess(ctk.CTk):
             w.destroy()
         self._kb_renderizar()
         # Ocupa el 65% inferior de la pantalla 
-        self._ov_teclado.place(relx=0, rely=0.35, relwidth=1, relheight=0.65)
+        self._ov_teclado.place(relx=0, rely=0.46, relwidth=1, relheight=0.54)
         self._ov_teclado.lift()
 
     def _kb_renderizar(self):
@@ -1634,9 +1701,9 @@ class FaceAccess(ctk.CTk):
         FS  = self._KB_FS
 
         filas = [
-            ["1","2","3","4","5","6","7","8","9","0","⌫"],
+            ["1","2","3","4","5","6","7","8","9","0"],
             ["Q","W","E","R","T","Y","U","I","O","P"],
-            ["A","S","D","F","G","H","J","K","L"],
+            ["A","S","D","F","G","H","J","K","L","⌫"],
             ["⇧","Z","X","C","V","B","N","M","-","_"],
         ]
 
@@ -1684,7 +1751,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkButton(
             fb, text="Espacio",
-            width=self._KB_SPC_W, height=self._KB_ACT_H,
+            width=self._KB_SPC_W, height=70,
             font=("Helvetica", FS),
             fg_color=C_FRAME, text_color=C_TXT,
             hover_color=C_BORDE,
@@ -1695,7 +1762,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkButton(
             fb, text="Listo ✓",
-            width=140, height=self._KB_ACT_H,
+            width=140, height=70,
             font=("Helvetica", FS, "bold"),
             fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A",
@@ -1728,7 +1795,6 @@ class FaceAccess(ctk.CTk):
         if hasattr(self, "cap") and self.cap:
             self.cap.release()
         self.destroy()
-
 
 if __name__ == "__main__":
     app = FaceAccess()
