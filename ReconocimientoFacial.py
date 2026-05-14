@@ -3,6 +3,8 @@ ReconocimientoFacial.py — Sistema de control de acceso por reconocimiento faci
 
 """
 
+#from curses.panel import panel
+
 import cv2
 import os
 import threading
@@ -76,9 +78,9 @@ H_SALUDO = 34
 H_VIDEO  = 800 - H_HEADER - H_SALUDO
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 #  FUNCIONES DE RECONOCIMIENTO 
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 def cargar_encodings():
     """
@@ -133,9 +135,9 @@ def buscar(rostro_gray, recognizer):
         return None, confianza    # desconocido
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 #  CLASE PRINCIPAL DE LA APLICACIÓN
-# ══════════════════════════════════════════════════════════════════════════════
+
 
 class FaceAccess(ctk.CTk):
 
@@ -721,6 +723,7 @@ class FaceAccess(ctk.CTk):
         self._build_alerta_duplicado()
         self._build_numpad()
         self._build_ov_login()
+        self._build_ov_login_captura()
         self._build_ov_registro()
         self._build_ov_captura()
 
@@ -1033,6 +1036,102 @@ class FaceAccess(ctk.CTk):
                        text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 12),
                        command=self._cancelar_modo).pack(pady=(10, 0))
 
+    def _build_ov_login_captura(self):
+        """
+        Interfaz optimizada de validación para login.
+        Reutiliza el diseño de captura (banner, panel, video optimizado)
+        pero sin marco y con reconocimiento directo.
+        """
+        # Overlay principal
+        self.ov_login_captura = ctk.CTkFrame(
+            self.frame_video,
+            fg_color="#000000",
+            corner_radius=0
+        )
+
+        # VIDEO FULLSCREEN
+        self.lbl_login_cap_video = ctk.CTkLabel(
+            self.ov_login_captura,
+            text="",
+            fg_color="black"
+        )
+
+        # BANNER CON HEADER
+        banner = ctk.CTkFrame(
+            self.ov_login_captura,
+            fg_color="#0A1520",
+            corner_radius=0,
+            height=90
+        )
+        banner.place(
+            relx=0,
+            rely=0,
+            relwidth=1
+        )
+        banner.pack_propagate(False)
+
+        ctk.CTkLabel(
+            banner,
+            text="Validación de identidad",
+            font=("Helvetica", 20, "bold"),
+            text_color="white"
+        ).pack(pady=(12, 4), expand=False)
+
+        self.lbl_login_cap_user = ctk.CTkLabel(
+            banner,
+            text="",
+            font=("Helvetica", 14),
+            text_color="#00D4AA"
+        )
+        self.lbl_login_cap_user.pack(pady=(0, 8), expand=False)
+
+        # PANEL INFERIOR FLOTANTE
+        panel = ctk.CTkFrame(
+            self.ov_login_captura,
+            fg_color="#0A1520",
+            width=520,
+            height=160
+        )
+
+        panel.place(
+            relx=0.5,
+            rely=1,
+            anchor="s"
+        )
+        
+        panel.pack_propagate(False)
+        panel.grid_propagate(False)
+
+        # Instrucción
+        self.lbl_login_cap_instruc = ctk.CTkLabel(
+            panel,
+            text="Acerca tu rostro a la cámara",
+            font=("Helvetica", 22, "bold"),
+            text_color="white"
+        )
+        self.lbl_login_cap_instruc.pack(side="top", pady=(18, 10), expand=False)
+
+        # Estado
+        self.lbl_login_cap_estado = ctk.CTkLabel(
+            panel,
+            text="● Escaneando...",
+            font=("Helvetica", 14),
+            text_color=C_OK
+        )
+        self.lbl_login_cap_estado.pack(side="top", expand=False, pady=(10, 20))
+
+        # Cancelar
+        ctk.CTkButton(
+            panel,
+            text="Cancelar",
+            fg_color="transparent",
+            hover_color="#1E293B",
+            border_width=1,
+            border_color="#334155",
+            width=110,
+            command=self._cancelar_modo
+        ).pack(side="top", pady=(8, 10), expand=False)
+
     def _abrir_login(self):
         self._modo = "login"
         self._en_pausa = True
@@ -1071,151 +1170,31 @@ class FaceAccess(ctk.CTk):
             self.lbl_login_msg.configure(text="Tu rol no tiene permisos.", text_color=C_ERROR)
             self.btn_login_confirmar.configure(state="normal"); return
         
-        # Cambiar a modo validación con video visible
+        # Cambiar a modo validación con video optimizado
         self._login_usuario = dict(u)
         self.ov_login_form.pack_forget()
-        self.ov_login_validando.pack(fill="both", expand=True)
-        self.lbl_login_status.configure(text="● Detectando rostro...", text_color=C_OK)
+        
+        # Mostrar la interfaz de captura para login
+        self.ov_login_captura.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.lbl_login_cap_user.configure(text=u["nombre"])
         
         # Iniciar validación con loop de video
+        self._login_cap_video_positioned = False
         self._login_validando = True
-        self.after(300, lambda: self._validar_rostro_login_con_video(mat))
-
-    def _validar_rostro_login_con_video(self, matricula):
-        """
-        Valida el rostro del admin mostrando el video en vivo.
-        Requiere múltiples frames consecutivos para confirmar identidad.
-        """
-        if not self._login_validando or self._modo != "login":
-            return
-
-        if self._picam:
-            frame = self._picam.capture_array()
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            frame = cv2.flip(frame, 1)
-        else:
-            ret, frame = self.cap.read()
-            if not ret:
-                self.after(50, lambda: self._validar_rostro_login_con_video(matricula))
-                return
-            frame = cv2.flip(frame, 1)
-
-        try:
-            # Mostrar video manteniendo relación de aspecto sin estirar
-            h_orig, w_orig = frame.shape[:2]
-            
-            # Espacio disponible: ~280x300 (aproximado)
-            target_w = 280
-            target_h = int(280 * h_orig / w_orig)
-            
-            if target_h > 300:
-                target_h = 300
-                target_w = int(300 * w_orig / h_orig)
-            
-            frame_display = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            
-            # Crear canvas con fondo oscuro
-            canvas = np.zeros((300, 280, 3), dtype=np.uint8)
-            canvas.fill(10)  # Color gris oscuro
-            
-            # Centrar la imagen
-            y_off = (300 - target_h) // 2
-            x_off = (280 - target_w) // 2
-            canvas[y_off:y_off+target_h, x_off:x_off+target_w] = frame_display
-            
-            img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(img_rgb)
-            ci = ctk.CTkImage(light_image=img, dark_image=img, size=(280, 300))
-            self.lbl_login_video.configure(image=ci, text="")
-            self._ci_login = ci
-        except Exception as e:
-            print(f"[VIDEO LOGIN] {e}")
-
-        # Procesar el rostro
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
-        coords = self._detectar(small)
-
-        if coords is None:
-            self._login_frames_confirmados = 0
-            self.lbl_login_status.configure(text="⚠ No se detectó rostro", text_color=C_WARN)
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula))
-            return
-
-        x, y, w, h = coords
-        rostro_gray = small[y:y+h, x:x+w]
-
-        id_u, confianza = buscar(rostro_gray, self._recognizer)
-
-        # Si el rostro NO coincide, rechazar inmediatamente
-        if id_u != self._login_usuario["id_usuario"]:
-            self._login_frames_confirmados = 0
-            self._login_frames_fallidos += 1
-
-            frames_fallo = 5
-
-            self.lbl_login_status.configure(
-                text=f"⚠ Validando rostro... fallo [{self._login_frames_fallidos}/{frames_fallo}]",
-                text_color=C_WARN
-            )
-
-            if self._login_frames_fallidos >= frames_fallo:
-
-                self.lbl_login_status.configure(
-                    text="✗ Rostro no coincide. Reintentando...",
-                    text_color=C_ERROR
-                )
-
-                print(
-                    f"[LOGIN ERROR] Rostro no coincide. "
-                    f"ID esperado: {self._login_usuario['id_usuario']}, detectado: {id_u}"
-                )
-
-                registrar_intento_fallido(
-                    "Rostro no coincide en login",
-                    matricula=matricula,
-                    id_usuario=self._login_usuario["id_usuario"]
-                )
-
-                # Reiniciar contadores
-                self._login_frames_confirmados = 0
-                self._login_frames_fallidos = 0
-
-                # Esperar antes de reintentar
-                self.after(
-                    2500,
-                    lambda: self._validar_rostro_login_con_video(matricula)
-                )
-
-                return
-
-            self.after(120, lambda: self._validar_rostro_login_con_video(matricula))
-            return
-
-        # Si el rostro SÍ coincide, incrementar contador
-        self._login_frames_confirmados += 1
-        frames_necesarios = 5  # Esperar 5 frames confirmados (~250ms a 20 fps)
-        
-        # Mostrar progreso visual
-        self.lbl_login_status.configure(
-            text=f"✓ Validando... [{self._login_frames_confirmados}/{frames_necesarios}]",
-            text_color=C_OK)
-
-        # Si no hemos alcanzado suficientes frames, continuar validando
-        if self._login_frames_confirmados < frames_necesarios:
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula))
-            return
-
-        # Validación exitosa después de múltiples frames confirmados
-        self.lbl_login_status.configure(text="✓ Identidad confirmada", text_color=C_OK)
-        print(f"[LOGIN] Acceso concedido: {self._login_usuario['nombre']} (conf: {confianza:.1f})")
-        self._login_validando = False
-        self.after(800, lambda: self._abrir_registro(self._login_usuario))
+        self._login_frames_confirmados = 0
+        self._login_frames_fallidos = 0
+        self.lbl_login_cap_estado.configure(text="● Detectando rostro...", text_color=C_OK)
+        self.after(300, lambda: self._loop_login_captura(mat))
 
     def _resetear_login_form(self):
         """Regresa a la pantalla de login con formulario."""
         self._login_frames_confirmados = 0
-        self.ov_login_validando.pack_forget()
+        self._login_frames_fallidos = 0
+        # Limpiar caché de imagen del video anterior
+        if hasattr(self, '_ci_login_cap'):
+            del self._ci_login_cap
+        self.lbl_login_cap_video.configure(image=None, text="")
+        self.ov_login_captura.place_forget()
         self.ov_login_form.pack(fill="both", expand=True)
         self.entry_mat_l.delete(0, "end")
         self.entry_pass_l.delete(0, "end")
@@ -1233,10 +1212,11 @@ class FaceAccess(ctk.CTk):
         self._coincidencias = []  # Limpiar coincidencias de duplicados
         self._login_validando = False  # Detener validación de login si está en curso
         self._login_frames_confirmados = 0  # Resetear contador de frames de login
+        self._login_frames_fallidos = 0  # Resetear contador de fallos
         self._set_estado("escaneando")
         self._ocultar_msg()
         
-        # Si estábamos en login, resetear formulario
+        # Si estábamos en login (formulario o captura), resetear formulario
         if modo_anterior == "login":
             self._resetear_login_form()
         elif modo_anterior == "captura":
@@ -1343,14 +1323,6 @@ class FaceAccess(ctk.CTk):
                 self._grupo_frame.grid_remove()
 
 
-    #Para ojo de contraseña
-    def _toggle_password(self, entry):
-        if entry.cget("show") == "":
-            entry.configure(show="*")
-        else:
-            entry.configure(show="")
-
-
     def _reg_continuar(self):
         datos = {k: e.get().strip() for k, e in self._entries.items()}
         mapa  = {"ADMIN":1,"PERSONAL_AUTORIZADO":2,"PERSONAL_ESCOLAR":3,"ALUMNO":4}
@@ -1440,67 +1412,346 @@ class FaceAccess(ctk.CTk):
     # ── Captura de rostro para registro ──────────────────────────────────────
 
     def _build_ov_captura(self):
-        self.ov_captura = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
         
-        # Header con título y nombre
-        header_frame = ctk.CTkFrame(self.ov_captura, fg_color="transparent")
-        header_frame.pack(pady=(12, 6), fill="x")
-        ctk.CTkLabel(header_frame, text="Captura de rostro",
-                     font=("Helvetica", 15, "bold"), text_color=C_TXT).pack()
-        self.lbl_cap_nombre = ctk.CTkLabel(header_frame, text="",
-                                            font=("Helvetica", 11), text_color=C_OK)
-        self.lbl_cap_nombre.pack()
+        # Overlay principal
         
-        # Frame contenedor para video manteniendo relación de aspecto
-        self.frame_video_cap = ctk.CTkFrame(self.ov_captura, fg_color="#0A1520", corner_radius=8)
-        self.frame_video_cap.pack(padx=10, pady=6, fill="both", expand=True)
-        self.lbl_cap_video = ctk.CTkLabel(self.frame_video_cap, text="", fg_color="#0A1520")
-        self.lbl_cap_video.pack(fill="both", expand=True)
-        
-        # Indicación de posicionamiento - FUENTE MÁS GRANDE
-        self.lbl_cap_instruc = ctk.CTkLabel(self.ov_captura, text="Posiciona tu rostro en el marco",
-                                            font=("Helvetica", 14, "bold"), text_color=C_WARN)
-        self.lbl_cap_instruc.pack(pady=(6, 4))
-        
-        # Barra de progreso de captura
-        self.prog_cap = ctk.CTkProgressBar(self.ov_captura, width=340, height=6,
-                                           corner_radius=2, fg_color=C_BORDE,
-                                           progress_color=C_OK)
-        self.prog_cap.pack(padx=10, pady=2); self.prog_cap.set(0)
-        
-        # Contador y estado
-        info_frame = ctk.CTkFrame(self.ov_captura, fg_color="transparent")
-        info_frame.pack(pady=4, fill="x")
-        self.lbl_cap_cnt = ctk.CTkLabel(info_frame,
-                                        text=f"0 / {FOTOS_CAPTURA} fotos",
-                                        font=("Helvetica", 12, "bold"), text_color=C_OK)
-        self.lbl_cap_cnt.pack()
-        
-        self.lbl_cap_estado = ctk.CTkLabel(self.ov_captura, text="",
-                                           font=("Helvetica", 11, "bold"), text_color=C_TXT2)
-        self.lbl_cap_estado.pack(pady=(0, 8))
-        
-        ctk.CTkButton(self.ov_captura, text="✕ Cancelar", fg_color="transparent",
-                      text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 11),
-                      command=self._cancelar_modo).pack(pady=(0, 6))
+        self.ov_captura = ctk.CTkFrame(
+            self.frame_video,
+            fg_color="#000000",
+            corner_radius=0
+        )
 
+        
+        # VIDEO FULLSCREEN
+        
+        self.lbl_cap_video = ctk.CTkLabel(
+            self.ov_captura,
+            text="",
+            fg_color="black"
+        )
+        # Será posicionado dinámicamente en _loop_captura para ocupar espacio disponible
+
+        
+        # BANNER CON HEADER (con fondo oscuro) - CENTRADO
+        
+        banner = ctk.CTkFrame(
+            self.ov_captura,
+            fg_color="#0A1520",
+            corner_radius=0,
+            height=90
+        )
+        banner.place(
+            relx=0,
+            rely=0,
+            relwidth=1
+        )
+        banner.pack_propagate(False)
+
+        ctk.CTkLabel(
+            banner,
+            text="Captura de rostro",
+            font=("Helvetica", 20, "bold"),
+            text_color="white"
+        ).pack(pady=(12, 4), expand=False)
+
+        self.lbl_cap_nombre = ctk.CTkLabel(
+            banner,
+            text="",
+            font=("Helvetica", 14),
+            text_color="#00D4AA"
+        )
+        self.lbl_cap_nombre.pack(pady=(0, 8), expand=False)
+
+        
+        # PANEL INFERIOR FLOTANTE - CENTRADO
+        
+        panel = ctk.CTkFrame(
+            self.ov_captura,
+            fg_color="#0A1520",
+            width=520,
+            height=145
+        )
+
+        panel.place(
+            relx=0.5,
+            rely=1,
+            anchor="s",
+            y=-10   # separa el panel del borde inferior
+        )
+
+        panel.pack_propagate(False)
+
+        
+        # CONTENEDOR INTERNO CENTRADO
+        
+        content = ctk.CTkFrame(
+            panel,
+            fg_color="transparent"
+        )
+
+        content.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center"
+        )
+
+        
+        # INSTRUCCIÓN PRINCIPAL
+        
+        self.lbl_cap_instruc = ctk.CTkLabel(
+            content,
+            text="Mira hacia el frente",
+            font=("Helvetica", 22, "bold"),
+            text_color="white"
+        )
+
+        self.lbl_cap_instruc.pack(pady=(0, 8))
+
+        
+        # PROGRESS BAR
+        
+        self.prog_cap = ctk.CTkProgressBar(
+            content,
+            width=190,
+            height=14,
+            corner_radius=10,
+            fg_color="#DCE4EC",
+            progress_color="#00D4AA"
+        )
+
+        self.prog_cap.pack(pady=(0, 8))
+        self.prog_cap.set(0)
+
+        
+        # CONTADOR
+        
+        self.lbl_cap_cnt = ctk.CTkLabel(
+            content,
+            text=f"(0/{FOTOS_CAPTURA} imágenes registradas)",
+            font=("Helvetica", 13),
+            text_color="#00AEEF"
+        )
+
+        self.lbl_cap_cnt.pack(pady=(0, 10))
+
+        
+        # BOTÓN CANCELAR
+        
+        ctk.CTkButton(
+            content,
+            text="Cancelar",
+            fg_color="transparent",
+            hover_color="#1E293B",
+            border_width=1,
+            border_color="#334155",
+            width=120,
+            height=34,
+            command=self._cancelar_modo
+        ).pack()
+
+    
     def _actualizar_indicacion_captura(self):
         etapa = self._etapas_captura[self._etapa_actual]
 
-        self.lbl_cap_estado.configure(
-            text=etapa["mensaje"],
-            text_color=C_OK
-        )
 
         self.lbl_cap_cnt.configure(
             text=f"{self._cap_count} / {FOTOS_CAPTURA} fotos\n"
                 f"[{self._foto_actual + 1} / {etapa['fotos']}]"
         )
 
+    def _loop_login_captura(self, matricula):
+        """
+        Loop optimizado de validación de rostro para login.
+        - Utiliza la interfaz mejorada (banner, panel, video optimizado)
+        - SIN marco (solo validación de identidad)
+        - Con reconocimiento LBPH directo
+        """
+        if self._modo != "login" or not self._login_validando:
+            return
+
+        if self._picam:
+            frame = self._picam.capture_array()
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            frame = cv2.flip(frame, 1)
+        else:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.after(80, lambda: self._loop_login_captura(matricula))
+                return
+            frame = cv2.flip(frame, 1)
+
+        try:
+            
+            # ESPACIO DISPONIBLE (excluyendo banner y panel)
+            
+            BANNER_HEIGHT = 90
+            PANEL_HEIGHT = 160
+            
+            canvas_w = self.ov_login_captura.winfo_width()
+            canvas_h_total = self.ov_login_captura.winfo_height()
+            
+            # VALIDAR TAMAÑO ANTES DE PROCESAR
+            if canvas_w < 100 or canvas_h_total < 250:
+                self.after(80, lambda: self._loop_login_captura(matricula))
+                return
+            
+            canvas_h = canvas_h_total - BANNER_HEIGHT - PANEL_HEIGHT
+            
+            # Posicionar video en el espacio disponible
+            if not self._login_cap_video_positioned:
+                relheight = canvas_h / canvas_h_total
+                self.lbl_login_cap_video.place(
+                    relx=0,
+                    rely=BANNER_HEIGHT / canvas_h_total,
+                    relwidth=1,
+                    relheight=relheight
+                )
+                self._login_cap_video_positioned = True
+
+            
+            # TAMAÑO ORIGINAL DEL FRAME
+            
+            h_orig, w_orig = frame.shape[:2]
+
+            
+            # CÁLCULO DE ESCALA Y REDIMENSIONAMIENTO
+            
+            scale = max(canvas_w / w_orig, canvas_h / h_orig) * 0.75  # 75% para zoom out
+            target_w = int(w_orig * scale)
+            target_h = int(h_orig * scale)
+
+            
+            # CREAR CANVAS
+            
+            canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+            canvas.fill(10)
+
+            # REDIMENSIONAR FRAME AL TAMAÑO TARGET
+            frame_display = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+            # RECORTAR VIDEO PARA AJUSTAR AL ESPACIO DISPONIBLE
+            x_crop = max((target_w - canvas_w) // 2, 0)
+            y_crop = max((target_h - canvas_h) // 2, 0)
+
+            frame_display = frame_display[
+                y_crop:y_crop + canvas_h,
+                x_crop:x_crop + canvas_w
+            ]
+
+            # AJUSTE FINAL DE SEGURIDAD
+            frame_display = cv2.resize(
+                frame_display,
+                (canvas_w, canvas_h)
+            )
+
+            canvas[:] = frame_display
+
+            # Convertir a imagen PIL
+            img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(img_rgb)
+            ci = ctk.CTkImage(
+                light_image=img,
+                dark_image=img,
+                size=(canvas_w, canvas_h)
+            )
+
+            self.lbl_login_cap_video.configure(image=ci, text="")
+            self._ci_login_cap = ci
+
+            
+            # PROCESAMIENTO DE ROSTRO (reconocimiento)
+            
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
+            coords = self._detectar(small)
+
+            if coords is None:
+                self._login_frames_confirmados = 0
+                self.lbl_login_cap_estado.configure(
+                    text="⚠ No se detectó rostro",
+                    text_color=C_WARN
+                )
+                self.after(80, lambda: self._loop_login_captura(matricula))
+                return
+
+            x, y, w, h = coords
+            
+            # Procesar rostro recortado
+            margen = 10
+            x1 = max(x + margen, 0)
+            y1 = max(y + margen, 0)
+            x2 = min(x + w - margen, small.shape[1])
+            y2 = min(y + h - margen, small.shape[0])
+
+            rostro_crop = small[y1:y2, x1:x2]
+            if rostro_crop.size > 0:
+                rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
+                
+                # Preprocesamiento
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                rostro_res = clahe.apply(rostro_res)
+                rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+                rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
+
+                # Reconocimiento LBPH
+                if self._recognizer is not None:
+                    try:
+                        id_existente, confianza = buscar(rostro_res, self._recognizer)
+                        
+                        # Validar que sea el mismo usuario
+                        if id_existente != self._login_usuario["id_usuario"]:
+                            self._login_frames_confirmados = 0
+                            self._login_frames_fallidos += 1
+
+                            # Mostrar que no coincide pero continuar intentando inmediatamente
+                            self.lbl_login_cap_estado.configure(
+                                text="⚠ Rostro no válido, intenta de nuevo",
+                                text_color=C_WARN
+                            )
+
+                            print(f"[LOGIN] Rostro no coincide. ID esperado: {self._login_usuario['id_usuario']}, detectado: {id_existente}")
+
+                            # Continuar intentando sin pausa
+                            self.after(80, lambda: self._loop_login_captura(matricula))
+                            return
+
+                        # Rostro coincide: incrementar contador
+                        self._login_frames_confirmados += 1
+                        frames_necesarios = 5
+                        
+                        self.lbl_login_cap_estado.configure(
+                            text=f"✓ Validando... [{self._login_frames_confirmados}/{frames_necesarios}]",
+                            text_color=C_OK
+                        )
+
+                        # Si no hemos alcanzado suficientes frames, continuar
+                        if self._login_frames_confirmados < frames_necesarios:
+                            self.after(80, lambda: self._loop_login_captura(matricula))
+                            return
+
+                        # Validación exitosa
+                        self.lbl_login_cap_estado.configure(
+                            text="✓ Identidad confirmada",
+                            text_color=C_OK
+                        )
+                        print(f"[LOGIN] Acceso concedido: {self._login_usuario['nombre']}")
+                        self._login_validando = False
+                        self.after(800, lambda: self._abrir_registro(self._login_usuario))
+
+                    except Exception as e:
+                        print(f"[ERROR RECONOCIMIENTO LOGIN] {e}")
+                        self.after(80, lambda: self._loop_login_captura(matricula))
+                        return
+
+        except Exception as e:
+            print(f"[ERROR LOGIN CAPTURA] {e}")
+            self.after(80, lambda: self._loop_login_captura(matricula))
+
     def _abrir_captura(self):
         self._modo = "captura"
         self._cap_imagenes = []
         self._coincidencias = []
+        self._cap_video_positioned = False  # Reset para recalcular posición
         # OPTIMIZADO: Solo captura frontal, eliminadas posiciones laterales
         self._etapas_captura = [
             {"nombre": "Frente", "mensaje": "Mira al frente hacia la cámara", "fotos": 30},
@@ -1544,200 +1795,351 @@ class FaceAccess(ctk.CTk):
             frame = cv2.flip(frame, 1)
 
         try:
-            # Redimensionar manteniendo relación de aspecto
-            # Espacio disponible: ~360x390 (aproximado)
+
+            
+            # ESPACIO DISPONIBLE (excluyendo banner y panel)
+            
+            BANNER_HEIGHT = 90
+            PANEL_HEIGHT = 160
+            
+            canvas_w = self.ov_captura.winfo_width()
+            canvas_h_total = self.ov_captura.winfo_height()
+            
+            # VALIDAR TAMAÑO ANTES DE PROCESAR
+            if canvas_w < 100 or canvas_h_total < 250:
+                self.after(80, self._loop_captura)
+                return
+            
+            canvas_h = canvas_h_total - BANNER_HEIGHT - PANEL_HEIGHT
+            
+            # Posicionar video en el espacio disponible
+            if not self._cap_video_positioned:
+                relheight = canvas_h / canvas_h_total
+                self.lbl_cap_video.place(
+                    relx=0,
+                    rely=BANNER_HEIGHT / canvas_h_total,
+                    relwidth=1,
+                    relheight=relheight
+                )
+                self._cap_video_positioned = True
+
+            
+            # TAMAÑO ORIGINAL DEL FRAME
+            
             h_orig, w_orig = frame.shape[:2]
+
             
-            # Calcular escala para que quepa sin estirar
-            # Mantener relación 640x480 (4:3)
-            target_w = 360
-            target_h = int(360 * h_orig / w_orig)  # Mantener relación de aspecto
+            # VIDEO ESCALADO (Zoom reducido)
             
-            if target_h > 390:
-                target_h = 390
-                target_w = int(390 * w_orig / h_orig)
+            scale = max(
+                canvas_w / w_orig,
+                canvas_h / h_orig
+            ) * 0.85  # Reducir 25% para que se vea más alejado
+
+            target_w = int(w_orig * scale)
+            target_h = int(h_orig * scale)
+
             
+            # CREAR CANVAS
+            
+            canvas = np.zeros(
+                (canvas_h, canvas_w, 3),
+                dtype=np.uint8
+            )
+
+            canvas.fill(10)
+
+            # REDIMENSIONAR FRAME AL TAMAÑO TARGET
             frame_display = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+            # RECORTAR VIDEO PARA AJUSTAR AL ESPACIO DISPONIBLE
+            x_crop = max((target_w - canvas_w) // 2, 0)
+            y_crop = max((target_h - canvas_h) // 2, 0)
+
+            frame_display = frame_display[
+                y_crop:y_crop + canvas_h,
+                x_crop:x_crop + canvas_w
+            ]
+
+            # =====================================================
+            # AJUSTE FINAL DE SEGURIDAD
+            # =====================================================
+
+            frame_display = cv2.resize(
+                frame_display,
+                (canvas_w, canvas_h)
+            )
+
+            canvas[:] = frame_display
+
             
-            # Crear canvas del tamaño del contenedor
-            canvas = np.zeros((390, 360, 3), dtype=np.uint8)
-            canvas.fill(10)  # Color gris oscuro (#0A1520)
+            # MARCO FACIAL (DELIMITADOR DE CAPTURA - REDUCIDO)
             
-            # Centrar la imagen en el canvas
-            y_offset = (390 - target_h) // 2
-            x_offset = (360 - target_w) // 2
-            canvas[y_offset:y_offset+target_h, x_offset:x_offset+target_w] = frame_display
+            marco_w = int(canvas_w * 0.38)
+            marco_h = int(canvas_h * 0.42)
+            marco_x = (canvas_w - marco_w) // 2
+            marco_y = int((canvas_h - marco_h) / 2)  # Centrado verticalmente en el espacio disponible
+
+            # Color dinámico
+            color_marco = (
+                (0, 212, 170)
+                if self._posicion_valida
+                else (245, 166, 35)
+            )
+
+            linea = int(marco_w * 0.18)
+            grosor = 4
+
+            # ─────────────────────────────────
+            # Superior izquierda
+            # ─────────────────────────────────
+            cv2.line(
+                canvas,
+                (marco_x, marco_y),
+                (marco_x + linea, marco_y),
+                color_marco,
+                grosor
+            )
+
+            cv2.line(
+                canvas,
+                (marco_x, marco_y),
+                (marco_x, marco_y + linea),
+                color_marco,
+                grosor
+            )
+
+            # ─────────────────────────────────
+            # Superior derecha
+            # ─────────────────────────────────
+            cv2.line(
+                canvas,
+                (marco_x + marco_w, marco_y),
+                (marco_x + marco_w - linea, marco_y),
+                color_marco,
+                grosor
+            )
+
+            cv2.line(
+                canvas,
+                (marco_x + marco_w, marco_y),
+                (marco_x + marco_w, marco_y + linea),
+                color_marco,
+                grosor
+            )
+
+            # ─────────────────────────────────
+            # Inferior izquierda
+            # ─────────────────────────────────
+            cv2.line(
+                canvas,
+                (marco_x, marco_y + marco_h),
+                (marco_x + linea, marco_y + marco_h),
+                color_marco,
+                grosor
+            )
+
+            cv2.line(
+                canvas,
+                (marco_x, marco_y + marco_h),
+                (marco_x, marco_y + marco_h - linea),
+                color_marco,
+                grosor
+            )
+
+            # ─────────────────────────────────
+            # Inferior derecha
+            # ─────────────────────────────────
+            cv2.line(
+                canvas,
+                (marco_x + marco_w, marco_y + marco_h),
+                (marco_x + marco_w - linea, marco_y + marco_h),
+                color_marco,
+                grosor
+            )
+
+            cv2.line(
+                canvas,
+                (marco_x + marco_w, marco_y + marco_h),
+                (marco_x + marco_w, marco_y + marco_h - linea),
+                color_marco,
+                grosor
+            )
+
             
-            # Dibujar marco guía en las coordenadas del canvas
-            # Marco: 60% de ancho x 70% de alto, centrado
-            marco_w = int(target_w * 0.60)
-            marco_h = int(target_h * 0.70)
-            marco_x = x_offset + (target_w - marco_w) // 2
-            marco_y = y_offset + (target_h - marco_h) // 2
+            # EFECTO VALIDADO
+
+
             
-            # Color del marco según validación
-            color_marco = (0, 212, 170) if self._posicion_valida else (245, 166, 35)  # Verde o naranja
-            grosor_marco = 4 if self._posicion_valida else 3
+            # CONVERTIR A TK
             
-            cv2.rectangle(canvas, (marco_x, marco_y), 
-                         (marco_x + marco_w, marco_y + marco_h), 
-                         color_marco, grosor_marco)
-            
-            # Esquinas decorativas más grandes si está validado
-            if self._posicion_valida:
-                grosor_esquina = 4
-                for (px, py) in [(marco_x, marco_y), (marco_x + marco_w, marco_y),
-                                 (marco_x, marco_y + marco_h), (marco_x + marco_w, marco_y + marco_h)]:
-                    cv2.circle(canvas, (px, py), 5, color_marco, grosor_esquina)
-            
-            # Convertir a RGB para CTkImage
             img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
             img = Image.fromarray(img_rgb)
-            ci = ctk.CTkImage(light_image=img, dark_image=img, size=(360, 390))
-            self.lbl_cap_video.configure(image=ci, text="")
+
+            ci = ctk.CTkImage(
+                light_image=img,
+                dark_image=img,
+                size=(canvas_w, canvas_h)
+            )
+
+            self.lbl_cap_video.configure(
+                image=ci,
+                text=""
+            )
+
             self._ci_cap = ci
+
+            
+            # PROCESAMIENTO DE ROSTRO (dentro del try para acceso a marco_*)
+            
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
+            coords = self._detectar(small)
+
+            # Variables para validar posicionamiento
+            rostro_bien_posicionado = False
+            instruccion = ""
+
+            if coords is not None:
+                x, y, w, h = coords
+                h_sm, w_sm = small.shape[:2]
+                
+                # IMPORTANTE: Validar que el ROSTRO COMPLETO esté dentro del MARCO VISUAL
+                # Convertir límites a espacio normalizado (0-1)
+                rostro_x_norm_min = x / w_sm
+                rostro_x_norm_max = (x + w) / w_sm
+                rostro_y_norm_min = y / h_sm
+                rostro_y_norm_max = (y + h) / h_sm
+                
+                # Límites del marco visual en espacio normalizado
+                marco_x_norm = marco_x / canvas_w
+                marco_x_norm_max = (marco_x + marco_w) / canvas_w
+                marco_y_norm = marco_y / canvas_h
+                marco_y_norm_max = (marco_y + marco_h) / canvas_h
+                
+                # Validar que el rostro COMPLETO esté dentro del marco
+                if (rostro_x_norm_min >= marco_x_norm and rostro_x_norm_max <= marco_x_norm_max and
+                    rostro_y_norm_min >= marco_y_norm and rostro_y_norm_max <= marco_y_norm_max):
+                    # Centro del rostro
+                    centro_x = (x + w/2) / w_sm
+                    centro_y = (y + h/2) / h_sm
+                    
+                    # Validar que está lo suficientemente centrado
+                    marco_centro_x = (marco_x + marco_w/2) / canvas_w
+                    marco_centro_y = (marco_y + marco_h/2) / canvas_h
+                    
+                    if abs(centro_x - marco_centro_x) > 0.08 or abs(centro_y - marco_centro_y) > 0.10:
+                        instruccion = "Centra dentro del marco"
+                    else:
+                        rostro_bien_posicionado = True
+                        instruccion = "✓ Posición correcta"
+                else:
+                    # Determinar qué parte está fuera del marco
+                    if rostro_x_norm_min < marco_x_norm:
+                        instruccion = "Mueve a la derecha"
+                    elif rostro_x_norm_max > marco_x_norm_max:
+                        instruccion = "Mueve a la izquierda"
+                    elif rostro_y_norm_min < marco_y_norm:
+                        instruccion = "Baja un poco"
+                    elif rostro_y_norm_max > marco_y_norm_max:
+                        instruccion = "Sube un poco"
+                    else:
+                        instruccion = "Posiciónate en el marco"
+
+                # Actualizar estado visual
+                self._posicion_valida = rostro_bien_posicionado
+                
+                # Contar frames de validación continuos
+                if rostro_bien_posicionado:
+                    self._rostro_detectado_frames += 1
+                else:
+                    self._rostro_detectado_frames = 0
+
+                # Procesar rostro recortado
+                margen = 10
+                x1 = max(x + margen, 0)
+                y1 = max(y + margen, 0)
+                x2 = min(x + w - margen, small.shape[1])
+                y2 = min(y + h - margen, small.shape[0])
+
+                rostro_crop = small[y1:y2, x1:x2]
+                if rostro_crop.size > 0:
+                    rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
+                    # ─── Preprocesamiento mejorado para robustez ante iluminación ───────────
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    rostro_res = clahe.apply(rostro_res)
+                    rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
+                    rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
+
+                    # Validar duplicados solo si el rostro está bien posicionado
+                    if self._recognizer is not None and self._cap_count >= 10 and rostro_bien_posicionado:
+                        try:
+                            id_existente, confianza = buscar(rostro_res, self._recognizer)
+                            if id_existente is not None and confianza < 55:
+                                self._coincidencias.append(id_existente)
+                                print(f"[DUPLICADO DEBUG] ID: {id_existente}, Confianza: {confianza:.1f}, Total coincidencias: {len(self._coincidencias)}")
+
+                            if len(self._coincidencias) >= 5:
+                                id_mas_repetido = max(
+                                    set(self._coincidencias),
+                                    key=self._coincidencias.count
+                                )
+
+                                if self._coincidencias.count(id_mas_repetido) >= 3:
+                                    usuario_existente = obtener_usuario_por_id(id_mas_repetido)
+                                    nombre_existente = "Usuario existente"
+                                    if usuario_existente:
+                                        nombre_existente = (
+                                            f"{usuario_existente['nombre']} "
+                                            f"{usuario_existente['apellido_p']}"
+                                        )
+
+                                    print(f"[DUPLICADO] Rostro ya registrado para: {nombre_existente} (ID: {id_mas_repetido})")
+                                    self._mostrar_alerta_duplicado(nombre_existente)
+                                    self.after(4000, self._cancelar_modo)
+                                    return
+
+                        except Exception as e:
+                            print(f"[VALIDACIÓN ROSTRO] {e}")
+
+                    # CAPTURAR: Solo si está bien posicionado durante 2+ frames seguidos
+                    if self._rostro_detectado_frames >= 2:
+                        self._cap_imagenes.append(rostro_res)
+                        self._foto_actual += 1
+                        self._cap_count += 1
+                        self._rostro_detectado_frames = 0
+                        
+                        etapa = self._etapas_captura[self._etapa_actual]
+                        self.prog_cap.set(self._cap_count / FOTOS_CAPTURA)
+                        self.lbl_cap_cnt.configure(
+                            text=f"{self._cap_count} / {FOTOS_CAPTURA} fotos",
+                            text_color=C_OK
+                        )
+
+                        if self._foto_actual >= etapa["fotos"]:
+                            self._etapa_actual += 1
+                            self._foto_actual = 0
+
+                            if self._etapa_actual >= len(self._etapas_captura):
+                                self.after(100, self._finalizar_registro)
+                                return
+
+                        self.after(400, self._loop_captura)
+                        return
+            else:
+                self._rostro_detectado_frames = 0
+                self._posicion_valida = False
+                instruccion = "Acerca tu rostro"
+
+            # Actualizar instrucciones
+            etapa = self._etapas_captura[self._etapa_actual]
+            estado_color = C_OK if self._posicion_valida else C_WARN
+            self.lbl_cap_instruc.configure(text=instruccion, text_color=estado_color)
+
         except Exception as e:
             print(f"[ERROR CAPTURA] {e}")
             self.after(80, self._loop_captura); return
-
-        # Procesamiento de rostro
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
-        coords = self._detectar(small)
-
-        # Variables para validar posicionamiento
-        rostro_bien_posicionado = False
-        instruccion = ""
-
-        if coords is not None:
-            x, y, w, h = coords
-            h_sm, w_sm = small.shape[:2]
-            
-            # Validar tamaño del rostro (debe ocupar entre 20% y 60% de la altura)
-            ratio_altura = h / h_sm
-            if ratio_altura < 0.15:
-                instruccion = "Acércate más"
-            elif ratio_altura > 0.70:
-                instruccion = "Aléjate un poco"
-            else:
-                # Validar centrado (debe estar en el 50% central del frame)
-                centro_x = (x + w/2) / w_sm
-                centro_y = (y + h/2) / h_sm
-                
-                if abs(centro_x - 0.5) > 0.15:
-                    instruccion = "Centra tu rostro"
-                elif abs(centro_y - 0.45) > 0.15:
-                    instruccion = "Ajusta la altura"
-                else:
-                    rostro_bien_posicionado = True
-                    instruccion = "✓ Posición correcta"
-
-            # Actualizar estado visual
-            self._posicion_valida = rostro_bien_posicionado
-            
-            # Contar frames de validación continuos
-            if rostro_bien_posicionado:
-                self._rostro_detectado_frames += 1
-            else:
-                self._rostro_detectado_frames = 0
-
-            # Procesar rostro recortado
-            margen = 10
-            x1 = max(x + margen, 0)
-            y1 = max(y + margen, 0)
-            x2 = min(x + w - margen, small.shape[1])
-            y2 = min(y + h - margen, small.shape[0])
-
-            rostro_crop = small[y1:y2, x1:x2]
-            if rostro_crop.size > 0:
-                rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
-                # ─── Preprocesamiento mejorado para robustez ante iluminación ───────────
-                # CLAHE (Contrast Limited Adaptive Histogram Equalization)
-                # Es superior a equalizeHist porque adapta localmente y limita contraste
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                rostro_res = clahe.apply(rostro_res)
-                # Filtro bilateral: preserva bordes mientras suaviza ruido
-                rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
-                # Normalización de intensidad (0-255)
-                rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
-
-                # Validar duplicados solo si el rostro está bien posicionado
-                # Se valida desde la foto 15 para tener suficiente confianza con 30 fotos
-                if self._recognizer is not None and self._cap_count >= 15 and rostro_bien_posicionado:
-                    try:
-                        id_existente, confianza = buscar(rostro_res, self._recognizer)
-                        
-                        # Umbral MÁS ESTRICTO para duplicados: < 40 (evitar falsos positivos)
-                        # < 40: Rostro MUY similar (probable duplicado)
-                        # 40-70: Similar pero podría ser usuario nuevo con características parecidas
-                        # > 70: Rostro desconocido (usuario nuevo)
-                        if id_existente is not None and confianza < 40:
-                            self._coincidencias.append(id_existente)
-
-                        # Detectar duplicado real: 5+ coincidencias en 7 muestras (más restrictivo)
-                        if len(self._coincidencias) >= 7:
-                            id_mas_repetido = max(
-                                set(self._coincidencias),
-                                key=self._coincidencias.count
-                            )
-
-                            if self._coincidencias.count(id_mas_repetido) >= 5:
-                                usuario_existente = obtener_usuario_por_id(id_mas_repetido)
-                                nombre_existente = "Usuario existente"
-                                if usuario_existente:
-                                    nombre_existente = (
-                                        f"{usuario_existente['nombre']} "
-                                        f"{usuario_existente['apellido_p']}"
-                                    )
-
-                                print(f"[DUPLICADO] Rostro ya registrado para: {nombre_existente} (ID: {id_mas_repetido})")
-                                
-                                # Mostrar alerta visual estilo modal
-                                self._mostrar_alerta_duplicado(nombre_existente)
-
-                                # Esperar 4 segundos para que el usuario lea el mensaje
-                                self.after(4000, self._cancelar_modo)
-                                return
-
-                    except Exception as e:
-                        print(f"[VALIDACIÓN ROSTRO] {e}")
-
-                # CAPTURAR: Solo si está bien posicionado durante 2+ frames seguidos (optimizado)
-                if self._rostro_detectado_frames >= 2:
-                    self._cap_imagenes.append(rostro_res)
-                    self._foto_actual += 1
-                    self._cap_count += 1
-                    self._rostro_detectado_frames = 0  # Resetear contador
-                    
-                    etapa = self._etapas_captura[self._etapa_actual]
-                    self.prog_cap.set(self._cap_count / FOTOS_CAPTURA)
-                    self.lbl_cap_cnt.configure(
-                        text=f"{self._cap_count} / {FOTOS_CAPTURA} fotos  |  [{self._foto_actual}/{etapa['fotos']}]",
-                        text_color=C_OK
-                    )
-
-                    # Cambiar a siguiente etapa (solo hay 1: Frente)
-                    if self._foto_actual >= etapa["fotos"]:
-                        self._etapa_actual += 1
-                        self._foto_actual = 0
-
-                        if self._etapa_actual >= len(self._etapas_captura):
-                            self.after(100, self._finalizar_registro)
-                            return
-
-                    # Pausa entre capturas (400ms para balance velocidad-calidad con 30 fotos)
-                    self.after(400, self._loop_captura)
-                    return
-        else:
-            self._rostro_detectado_frames = 0
-            self._posicion_valida = False
-            instruccion = "Acerca tu rostro"
-
-        # Actualizar instrucciones
-        etapa = self._etapas_captura[self._etapa_actual]
-        estado_color = C_OK if self._posicion_valida else C_WARN
-        self.lbl_cap_estado.configure(text=etapa["mensaje"], text_color=estado_color)
-        self.lbl_cap_instruc.configure(text=instruccion, text_color=estado_color)
 
         self.after(80, self._loop_captura)
 
@@ -1778,8 +2180,7 @@ class FaceAccess(ctk.CTk):
         Guarda el nuevo usuario y re-entrena el modelo LBPH.
         Usa transacción: si algo falla, no guarda nada (ROLLBACK automático).
         """
-        self.lbl_cap_estado.configure(text="Procesando...", text_color=C_WARN)
-        self.update()
+
         try:
             # Validar que el rostro no sea duplicado
             es_duplicado, id_dup, conf_dup = self._validar_rostro_duplicado()
@@ -1879,7 +2280,7 @@ class FaceAccess(ctk.CTk):
     # ── Overlays y estado ─────────────────────────────────────────────────────
 
     def _ocultar_overlays(self):
-        for ov in [self.ov_numpad, self.ov_login, self.ov_registro, self.ov_captura]:
+        for ov in [self.ov_numpad, self.ov_login, self.ov_login_captura, self.ov_registro, self.ov_captura]:
             ov.place_forget()
         self._ocultar_alerta_duplicado()
         self._ocultar_msg()
