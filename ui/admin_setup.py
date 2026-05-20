@@ -21,7 +21,8 @@ from models.entrenadoRF import entrenar, FACE_SIZE
 from core.camara import CamaraManager
 from ui.constantes import (
     C_BG, C_FRAME, C_BORDE, C_OK, C_WARN, C_ERROR, C_TXT, C_TXT2,
-    APP_GEOMETRY, HAAR_CASCADE, ESCALA_DETEC, MIN_VECINOS, MIN_TAMANO_RELAT
+    APP_GEOMETRY, HAAR_CASCADE, ESCALA_DETEC, MIN_VECINOS, MIN_TAMANO_RELAT,
+    H_HEADER, H_VIDEO, s, sf
 )
 from ui.teclado import TecladoVirtual
 
@@ -66,12 +67,12 @@ class AdminSetup(ctk.CTk):
 
     def _build_header(self):
         """Construir barra de header."""
-        f = ctk.CTkFrame(self, fg_color=C_FRAME, corner_radius=0, height=70)
+        f = ctk.CTkFrame(self, fg_color=C_FRAME, corner_radius=0, height=s(H_HEADER, self))
         f.pack(fill="x")
         f.pack_propagate(False)
         ctk.CTkLabel(
             f, text="⚙  Setup inicial — Primer administrador",
-            font=("Helvetica", 15, "bold"), text_color=C_WARN
+            font=("Helvetica", sf(15, self), "bold"), text_color=C_WARN
         ).pack(side="left", padx=20, pady=18)
 
     def _build_formulario(self):
@@ -81,8 +82,8 @@ class AdminSetup(ctk.CTk):
 
         ctk.CTkLabel(
             self.frm_form, text="Ingresa los datos del administrador principal",
-            font=("Helvetica", 13), text_color=C_TXT2
-        ).pack(pady=(20, 10))
+            font=("Helvetica", sf(13, self)), text_color=C_TXT2
+        ).pack(pady=(s(20, self), s(10, self)))
 
         grid = ctk.CTkFrame(self.frm_form, fg_color="transparent")
         grid.pack(anchor="center")
@@ -98,13 +99,13 @@ class AdminSetup(ctk.CTk):
         self._entries = {}
         for i, (lbl, key) in enumerate(campos):
             f = ctk.CTkFrame(grid, fg_color="transparent")
-            f.grid(row=i // 2, column=i % 2, padx=25, pady=6, sticky="w")
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
+            f.grid(row=i // 2, column=i % 2, padx=s(25, self), pady=s(6, self), sticky="w")
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", sf(10, self)), text_color=C_TXT2).pack(anchor="w")
 
             if "contrasenia" in key:
                 fp = ctk.CTkFrame(f, fg_color="transparent")
                 fp.pack(anchor="w")
-                e = ctk.CTkEntry(fp, width=128, height=36, font=("Helvetica", 13), show="*")
+                e = ctk.CTkEntry(fp, width=s(128, self), height=s(36, self), font=("Helvetica", sf(13, self)), show="*")
                 e.pack(side="left")
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
                 vis = [False]
@@ -114,13 +115,13 @@ class AdminSetup(ctk.CTk):
                     en.configure(show="" if v[0] else "*")
 
                 ctk.CTkButton(
-                    fp, text="👁", width=30, height=36,
+                    fp, text="👁", width=s(30, self), height=s(36, self),
                     fg_color=C_FRAME, hover_color=C_BORDE,
-                    text_color=C_TXT2, font=("Helvetica", 14),
+                    text_color=C_TXT2, font=("Helvetica", sf(14, self)),
                     command=_toggle
-                ).pack(side="left", padx=(2, 0))
+                ).pack(side="left", padx=(s(2, self), 0))
             else:
-                e = ctk.CTkEntry(f, width=160, height=36, font=("Helvetica", 13))
+                e = ctk.CTkEntry(f, width=s(160, self), height=s(36, self), font=("Helvetica", sf(13, self)))
                 e.pack()
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
 
@@ -128,16 +129,16 @@ class AdminSetup(ctk.CTk):
 
         self.lbl_err = ctk.CTkLabel(
             self.frm_form, text="",
-            font=("Helvetica", 11), text_color=C_ERROR
+            font=("Helvetica", sf(11, self)), text_color=C_ERROR
         )
-        self.lbl_err.pack(pady=6)
+        self.lbl_err.pack(pady=s(6, self))
 
         ctk.CTkButton(
-            self.frm_form, text="Continuar →", width=200, height=44,
+            self.frm_form, text="Continuar →", width=s(200, self), height=s(44, self),
             fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-            font=("Helvetica", 14, "bold"), corner_radius=12,
+            font=("Helvetica", sf(14, self), "bold"), corner_radius=s(12, self),
             command=self._validar_form
-        ).pack(pady=8)
+        ).pack(pady=s(8, self))
 
     def _validar_form(self):
         """Validar datos del formulario."""
@@ -185,47 +186,47 @@ class AdminSetup(ctk.CTk):
         self.frm_cap = ctk.CTkFrame(self, fg_color=C_BG)
         ctk.CTkLabel(
             self.frm_cap, text="Captura de rostro",
-            font=("Helvetica", 15, "bold"), text_color=C_TXT
-        ).pack(pady=(20, 2))
+            font=("Helvetica", sf(15, self), "bold"), text_color=C_TXT
+        ).pack(pady=(s(20, self), s(2, self)))
 
         self.lbl_cap_nombre = ctk.CTkLabel(
             self.frm_cap, text="",
-            font=("Helvetica", 12), text_color=C_OK
+            font=("Helvetica", sf(12, self)), text_color=C_OK
         )
-        self.lbl_cap_nombre.pack(pady=(0, 8))
+        self.lbl_cap_nombre.pack(pady=(0, s(8, self)))
 
-        self.lbl_cap_video = ctk.CTkLabel(self.frm_cap, text="", width=360, height=390)
+        self.lbl_cap_video = ctk.CTkLabel(self.frm_cap, text="", width=s(360, self), height=s(390, self))
         self.lbl_cap_video.pack()
 
         ctk.CTkLabel(
             self.frm_cap, text="Mueve la cabeza en distintos ángulos",
-            font=("Helvetica", 11), text_color=C_TXT2
-        ).pack(pady=6)
+            font=("Helvetica", sf(11, self)), text_color=C_TXT2
+        ).pack(pady=s(6, self))
 
         self.prog_cap = ctk.CTkProgressBar(
-            self.frm_cap, width=320, height=6,
-            corner_radius=3, fg_color=C_BORDE, progress_color=C_OK
+            self.frm_cap, width=s(320, self), height=s(6, self),
+            corner_radius=s(3, self), fg_color=C_BORDE, progress_color=C_OK
         )
         self.prog_cap.pack()
         self.prog_cap.set(0)
 
         self.lbl_cap_cnt = ctk.CTkLabel(
             self.frm_cap, text=f"0 / {FOTOS_CAPTURA} fotos",
-            font=("Helvetica", 12), text_color=C_TXT2
+            font=("Helvetica", sf(12, self)), text_color=C_TXT2
         )
-        self.lbl_cap_cnt.pack(pady=4)
+        self.lbl_cap_cnt.pack(pady=s(4, self))
 
         self.lbl_cap_instruc = ctk.CTkLabel(
             self.frm_cap, text="",
-            font=("Helvetica", 11), text_color=C_WARN
+            font=("Helvetica", sf(11, self)), text_color=C_WARN
         )
         self.lbl_cap_instruc.pack()
 
         self.lbl_cap_estado = ctk.CTkLabel(
             self.frm_cap, text="",
-            font=("Helvetica", 12, "bold"), text_color=C_OK
+            font=("Helvetica", sf(12, self), "bold"), text_color=C_OK
         )
-        self.lbl_cap_estado.pack(pady=4)
+        self.lbl_cap_estado.pack(pady=s(4, self))
 
     def _abrir_captura(self):
         """Abrir interfaz de captura."""
@@ -276,18 +277,20 @@ class AdminSetup(ctk.CTk):
 
         try:
             h_orig, w_orig = frame.shape[:2]
-            target_w = 360
-            target_h = int(360 * h_orig / w_orig)
-            if target_h > 390:
-                target_h = 390
-                target_w = int(390 * w_orig / h_orig)
+            base_w = s(360, self)
+            base_h = s(390, self)
+            target_w = base_w
+            target_h = int(base_w * h_orig / w_orig)
+            if target_h > base_h:
+                target_h = base_h
+                target_w = int(base_h * w_orig / h_orig)
 
             fd = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            canvas = np.zeros((390, 360, 3), dtype=np.uint8)
+            canvas = np.zeros((base_h, base_w, 3), dtype=np.uint8)
             canvas.fill(10)
 
-            y_off = (390 - target_h) // 2
-            x_off = (360 - target_w) // 2
+            y_off = (base_h - target_h) // 2
+            x_off = (base_w - target_w) // 2
             canvas[y_off : y_off + target_h, x_off : x_off + target_w] = fd
 
             marco_w = int(target_w * 0.60)
@@ -302,7 +305,7 @@ class AdminSetup(ctk.CTk):
             ci = ctk.CTkImage(
                 light_image=Image.fromarray(img_rgb),
                 dark_image=Image.fromarray(img_rgb),
-                size=(360, 390)
+                size=(base_w, base_h)
             )
             self.lbl_cap_video.configure(image=ci, text="")
             self._ci_cap = ci
@@ -440,20 +443,20 @@ class AdminSetup(ctk.CTk):
         inner = ctk.CTkFrame(self.frm_cap, fg_color="transparent")
         inner.pack(expand=True)
 
-        ctk.CTkLabel(inner, text="✅", font=("Helvetica", 52)).pack(pady=(40, 10))
+        ctk.CTkLabel(inner, text="✅", font=("Helvetica", sf(52, self))).pack(pady=(s(40, self), s(10, self)))
         ctk.CTkLabel(
             inner, text="¡Administrador registrado!",
-            font=("Helvetica", 20, "bold"), text_color=C_OK
-        ).pack(pady=(0, 6))
+            font=("Helvetica", sf(20, self), "bold"), text_color=C_OK
+        ).pack(pady=(0, s(6, self)))
         ctk.CTkLabel(
             inner, text=f"{self._reg_datos['nombre']} {self._reg_datos['apellido_p']}",
-            font=("Helvetica", 14), text_color=C_TXT
-        ).pack(pady=(0, 24))
+            font=("Helvetica", sf(14, self)), text_color=C_TXT
+        ).pack(pady=(0, s(24, self)))
 
         ctk.CTkButton(
-            inner, text="Iniciar sistema  →", width=220, height=46,
+            inner, text="Iniciar sistema  →", width=s(220, self), height=s(46, self),
             fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-            font=("Helvetica", 15, "bold"), corner_radius=12,
+            font=("Helvetica", sf(15, self), "bold"), corner_radius=s(12, self),
             command=self._cerrar
         ).pack()
 

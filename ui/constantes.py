@@ -20,11 +20,59 @@ C_TXT3  = "#4A6280"
 C_ADMIN = "#534AB7"
 
 # ─── Dimensiones de pantalla ──────────────────────────────────────────────────
-# Para laptop de pruebas: cambiar H_HEADER=58, H_SALUDO=34, APP_GEOMETRY="480x600"
+# Pantalla objetivo: 7" vertical 600x1024.
 H_HEADER      = 72
 H_SALUDO      = 40
-H_VIDEO       = 800 - H_HEADER - H_SALUDO
-APP_GEOMETRY  = "480x600"   # usar "480x600" en laptop
+H_FOOTER      = 72
+H_VIDEO       = 1024 - H_HEADER - H_SALUDO - H_FOOTER
+APP_GEOMETRY  = "600x1024"
+
+# resolución objetivo (ancho x alto)
+APP_W = 600
+APP_H = 1024
+
+
+def _calc_scale(root=None):
+	"""Calcular factor de escala relativo a la resolución objetivo.
+
+	Si se pasa un `root` (Tk/CTk) usa la resolución real de la pantalla,
+	si no, asume factor 1.0.
+	"""
+	try:
+		if root is None:
+			return 1.0
+		sw = root.winfo_screenwidth()
+		sh = root.winfo_screenheight()
+		# evitar divisiones por cero
+		if APP_W <= 0 or APP_H <= 0:
+			return 1.0
+		return min(sw / APP_W, sh / APP_H)
+	except Exception:
+		return 1.0
+
+
+def s(value, root=None):
+	"""Escala un valor entero (pixeles) según la pantalla.
+
+	Uso: `width=s(160, self)` dentro de métodos de una ventana.
+	"""
+	try:
+		f = _calc_scale(root)
+		return int(max(1, round(value * f)))
+	except Exception:
+		return int(value)
+
+
+def sf(point_size, root=None):
+	"""Escala un tamaño de fuente (puntos) usando el mismo factor.
+
+	Devuelve al menos 8 para mantener legibilidad.
+	"""
+	try:
+		f = _calc_scale(root)
+		return max(8, int(round(point_size * f)))
+	except Exception:
+		return int(point_size)
 
 # ─── Parámetros de visión ─────────────────────────────────────────────────────
 HAAR_CASCADE      = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
