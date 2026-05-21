@@ -22,7 +22,7 @@ from core.camara import CamaraManager
 from ui.constantes import (
     C_BG, C_FRAME, C_BORDE, C_OK, C_WARN, C_ERROR, C_TXT, C_TXT2,
     APP_GEOMETRY, HAAR_CASCADE, ESCALA_DETEC, MIN_VECINOS, MIN_TAMANO_RELAT,
-    H_HEADER, H_VIDEO, s, sf
+    H_HEADER, H_VIDEO, s, sf, sw
 )
 from ui.teclado import TecladoVirtual
 
@@ -86,7 +86,7 @@ class AdminSetup(ctk.CTk):
         ).pack(pady=(s(20, self), s(10, self)))
 
         grid = ctk.CTkFrame(self.frm_form, fg_color="transparent")
-        grid.pack(anchor="center")
+        grid.place(relx=0.5, rely=0.5, anchor="center")
 
         campos = [
             ("Nombre(s)", "nombre"),
@@ -99,13 +99,13 @@ class AdminSetup(ctk.CTk):
         self._entries = {}
         for i, (lbl, key) in enumerate(campos):
             f = ctk.CTkFrame(grid, fg_color="transparent")
-            f.grid(row=i // 2, column=i % 2, padx=s(25, self), pady=s(6, self), sticky="w")
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", sf(10, self)), text_color=C_TXT2).pack(anchor="w")
+            f.grid(row=i, column=0, columnspan=2, padx=s(12, self), pady=s(8, self), sticky="w")
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", sf(16, self)), text_color=C_TXT2).pack(anchor="w")
 
             if "contrasenia" in key:
                 fp = ctk.CTkFrame(f, fg_color="transparent")
                 fp.pack(anchor="w")
-                e = ctk.CTkEntry(fp, width=s(128, self), height=s(36, self), font=("Helvetica", sf(13, self)), show="*")
+                e = ctk.CTkEntry(fp, width=sw(0.8, self), height=s(48, self), font=("Helvetica", sf(15, self)), show="*")
                 e.pack(side="left")
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
                 vis = [False]
@@ -121,7 +121,7 @@ class AdminSetup(ctk.CTk):
                     command=_toggle
                 ).pack(side="left", padx=(s(2, self), 0))
             else:
-                e = ctk.CTkEntry(f, width=s(160, self), height=s(36, self), font=("Helvetica", sf(13, self)))
+                e = ctk.CTkEntry(f, width=sw(0.8, self), height=s(48, self), font=("Helvetica", sf(15, self)))
                 e.pack()
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
 

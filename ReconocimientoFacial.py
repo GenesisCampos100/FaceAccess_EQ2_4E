@@ -33,6 +33,7 @@ from ui.constantes       import (
     FRAMES_CONFIRM, PAUSA_SEG, FALLOS_NUMPAD, EVIDENCIAS_DIR, FOTOS_CAPTURA,
     KB_APP_W, KB_COLS, KB_PAD, KB_BH, KB_FS, KB_ACT_H,
 )
+from ui.constantes import s, sf, sw
 from ui.teclado import TecladoVirtual
 from database.db_manager import (
     obtener_usuario_por_id,
@@ -816,35 +817,45 @@ class FaceAccess(ctk.CTk):
 
     def _build_numpad(self):
         self._np_mayus = True
+        # Overlay que contiene un contenedor centralizado para el campo y teclado
         self.ov_numpad = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
 
-        ctk.CTkLabel(self.ov_numpad, text="Acceso manual",
-                     font=("Helvetica", 18, "bold"), text_color=C_TXT).pack(pady=(20, 2))
-        ctk.CTkLabel(self.ov_numpad, text="Ingresa tu matrícula",
-                     font=("Helvetica", 13), text_color=C_TXT2).pack()
-        self.lbl_np = ctk.CTkLabel(self.ov_numpad, text="",
-                                    font=("Helvetica", 26, "bold"), text_color=C_TXT,
-                                    fg_color=C_FRAME, corner_radius=10, width=420, height=54)
-        self.lbl_np.pack(pady=(6, 4), padx=16)
+        # Contenedor centrado con ancho relativo a la ventana (90% del ancho objetivo)
+        cont_w = sw(0.9, self)
+        self._np_inner = ctk.CTkFrame(self.ov_numpad, fg_color="transparent", width=cont_w)
+        self._np_inner.place(relx=0.5, rely=0.16, anchor="n")
 
-        fa = ctk.CTkFrame(self.ov_numpad, fg_color="transparent")
-        fa.pack(pady=(8, 10))
+        ctk.CTkLabel(self._np_inner, text="Acceso manual",
+                     font=("Helvetica", sf(18, self), "bold"), text_color=C_TXT).pack(pady=(8, 2))
+        ctk.CTkLabel(self._np_inner, text="Ingresa tu matrícula",
+                     font=("Helvetica", sf(13, self)), text_color=C_TXT2).pack()
 
-        self._np_kb_frame = ctk.CTkFrame(self.ov_numpad, fg_color="transparent")
-        self._np_kb_frame.pack(padx=8, fill="x", expand=True)
+        lbl_w = int(cont_w * 0.95)
+        self.lbl_np = ctk.CTkLabel(self._np_inner, text="",
+                                    font=("Helvetica", sf(26, self), "bold"), text_color=C_TXT,
+                                    fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(54, self))
+        self.lbl_np.pack(pady=(6, 6))
+
+        # Botones de acción debajo del input
+        fa = ctk.CTkFrame(self._np_inner, fg_color="transparent")
+        fa.pack(pady=(4, 6))
+
+        # Marco para el teclado que quedará centrado y con ancho del contenedor
+        self._np_kb_frame = ctk.CTkFrame(self.ov_numpad, fg_color="transparent", width=cont_w)
+        # posicionamos el teclado un poco más arriba (proporción similar a la otra captura)
+        self._np_kb_frame.place(relx=0.5, rely=0.68, anchor="n")
         self._np_botones = {}
         self._np_renderizar_teclado()
 
-
-        ctk.CTkButton(fa, text="Cancelar", width=130, height=self._KB_ACT_H,
+        ctk.CTkButton(fa, text="Cancelar", width=int(cont_w * 0.22), height=s(self._KB_ACT_H, self),
                        fg_color="transparent", text_color=C_TXT2, hover_color=C_FRAME,
-                       font=("Helvetica", 13),
+                       font=("Helvetica", sf(13, self)),
                        command=lambda: self._confirmar_cancelar(
                            "¿Cancelar acceso manual y volver al escaneo?",
                            accion_si=self._np_cancelar)).pack(side="left", padx=8)
-        ctk.CTkButton(fa, text="OK  ✓", width=180, height=self._KB_ACT_H,
+        ctk.CTkButton(fa, text="OK  ✓", width=int(cont_w * 0.3), height=s(self._KB_ACT_H, self),
                        fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", 15, "bold"), corner_radius=10,
+                       font=("Helvetica", sf(15, self), "bold"), corner_radius=10,
                        command=self._np_ok).pack(side="left", padx=8)
 
     def _np_renderizar_teclado(self):
@@ -852,7 +863,25 @@ class FaceAccess(ctk.CTk):
             w.destroy()
         self._np_botones.clear()
 
-        BW = self._KB_BW; BH = self._KB_BH; PAD = self._KB_PAD; FS = self._KB_FS
+        # Calcular dimensiones relativas según el ancho del contenedor central
+        # Aumentamos el ancho del contenedor para que ocupe casi todo el ancho visual
+        cont_w = self._np_kb_frame.winfo_width() or sw(0.98, self)
+        PAD = s(KB_PAD, self)
+        cols = KB_COLS
+        # permitir teclas grandes y con buen espaciado
+        BW = max(44, (cont_w - PAD * (cols + 1)) // cols)
+        BH = s(KB_BH + 6, self)
+        FS = sf(KB_FS + 2, self)
+        self._np_kb_frame.grid_columnconfigure(0, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(1, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(2, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(3, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(4, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(5, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(6, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(7, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(8, weight=1, uniform="kb")
+        self._np_kb_frame.grid_columnconfigure(9, weight=1, uniform="kb")
         filas = [
                 ["1","2","3","4","5","6","7","8","9","0"],
                 ["Q","W","E","R","T","Y","U","I","O","P"],
@@ -868,14 +897,14 @@ class FaceAccess(ctk.CTk):
 
                 if tecla == "⌫":
                     btn = ctk.CTkButton(self._np_kb_frame, text=tecla,
-                                        width=BW+10, height=BH, font=("Helvetica", FS),
+                                        width=BW+8, height=BH, font=("Helvetica", FS),
                                         fg_color=C_FRAME, text_color=C_ERROR,
                                         hover_color=C_BORDE, border_width=1,
                                         border_color=C_BORDE, corner_radius=8,
                                         command=self._np_del)
                 elif tecla == "⇧":
                     btn = ctk.CTkButton(self._np_kb_frame, text=tecla,
-                                        width=BW+10, height=BH, font=("Helvetica", FS),
+                                        width=BW+8, height=BH, font=("Helvetica", FS),
                                         fg_color=C_OK if self._np_mayus else C_FRAME,
                                         text_color=C_BG if self._np_mayus else C_TXT,
                                         hover_color=C_BORDE, border_width=1,
@@ -891,6 +920,39 @@ class FaceAccess(ctk.CTk):
                                         command=lambda t=texto: self._np_press(t))
                 btn.grid(row=r_idx, column=c_idx, padx=PAD, pady=PAD)
                 self._np_botones[tecla] = btn
+
+            # Fila inferior: Espacio (gran botón) y Listo (confirmación) a la derecha
+            # Espacio ocupa la mayor parte (columnspan=8) y Listo columna 8-9
+        fb = ctk.CTkFrame(self._np_kb_frame, fg_color="transparent")
+        fb.grid(row=len(filas), column=0, columnspan=10,
+                padx=PAD, pady=(4, 8), sticky="ew")
+        fb.grid_columnconfigure(0, weight=1)
+        fb.grid_columnconfigure(1, weight=0)
+        fb.grid_columnconfigure(2, weight=0)
+        fb.grid_columnconfigure(3, weight=1)
+
+        space_btn = ctk.CTkButton(
+            fb, text="Espacio",
+            width=max(220, int(cont_w * 0.62)), height=s(66, self),
+            font=("Helvetica", FS),
+            fg_color=C_FRAME, text_color=C_TXT,
+            hover_color=C_BORDE, border_width=1,
+            border_color=C_BORDE, corner_radius=8,
+            command=lambda: self._np_press(' ')
+        )
+        space_btn.grid(row=0, column=1, padx=self._PAD if hasattr(self, "_PAD") else PAD)
+        self._np_botones['SPACE'] = space_btn
+
+        listo_btn = ctk.CTkButton(
+            fb, text="Listo ✓",
+            width=max(150, int(cont_w * 0.28)), height=s(66, self),
+            font=("Helvetica", FS, "bold"),
+            fg_color=C_OK, text_color=C_BG,
+            hover_color="#00A88A", corner_radius=8,
+            command=self._np_ok
+        )
+        listo_btn.grid(row=0, column=2, padx=self._PAD if hasattr(self, "_PAD") else PAD)
+        self._np_botones['LISTO'] = listo_btn
 
     def _np_toggle_mayus(self):
         self._np_mayus = not self._np_mayus

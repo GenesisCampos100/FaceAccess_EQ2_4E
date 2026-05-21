@@ -56,7 +56,7 @@ class AdminSetup(ctk.CTk):
         f = ctk.CTkFrame(self, fg_color=C_FRAME, corner_radius=0, height=70)
         f.pack(fill="x"); f.pack_propagate(False)
         ctk.CTkLabel(f, text="⚙  Setup inicial — Primer administrador",
-                     font=("Helvetica", 15, "bold"), text_color=C_WARN
+                     font=("Helvetica", 18, "bold"), text_color=C_WARN
                      ).pack(side="left", padx=20, pady=18)
 
     # ── Formulario ────────────────────────────────────────────────────────────
@@ -65,11 +65,20 @@ class AdminSetup(ctk.CTk):
         self.frm_form = ctk.CTkFrame(self, fg_color=C_BG)
         self.frm_form.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(self.frm_form, text="Ingresa los datos del administrador principal",
-                     font=("Helvetica", 13), text_color=C_TXT2).pack(pady=(20, 10))
+        form_wrap = ctk.CTkFrame(self.frm_form, fg_color=C_BG)
+        form_wrap.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.90, relheight=0.80)
 
-        grid = ctk.CTkFrame(self.frm_form, fg_color="transparent")
-        grid.pack(anchor="center")
+        ctk.CTkLabel(
+            form_wrap,
+            text="Ingresa los datos del administrador principal",
+            font=("Helvetica", 18),
+            text_color=C_TXT2,
+        ).pack(pady=(26, 16))
+
+        grid = ctk.CTkFrame(form_wrap, fg_color="transparent")
+        grid.pack(fill="x", padx=24)
+        grid.grid_columnconfigure(0, weight=1)
+        grid.grid_columnconfigure(1, weight=1)
 
         campos = [
             ("Nombre(s)", "nombre"), ("Apellido paterno", "apellido_p"),
@@ -79,36 +88,54 @@ class AdminSetup(ctk.CTk):
         self._entries = {}
         for i, (lbl, key) in enumerate(campos):
             f = ctk.CTkFrame(grid, fg_color="transparent")
-            f.grid(row=i//2, column=i%2, padx=25, pady=6, sticky="w")
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 10), text_color=C_TXT2).pack(anchor="w")
+            f.grid(row=i//2, column=i%2, padx=12, pady=8, sticky="ew")
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 15), text_color=C_TXT2).pack(anchor="w")
 
             if "contrasenia" in key:
                 fp = ctk.CTkFrame(f, fg_color="transparent")
-                fp.pack(anchor="w")
-                e = ctk.CTkEntry(fp, width=128, height=36, font=("Helvetica", 13), show="*")
-                e.pack(side="left")
+                fp.pack(fill="x")
+                e = ctk.CTkEntry(fp, height=52, font=("Helvetica", 17), show="*")
+                e.pack(side="left", fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
                 vis = [False]
+
                 def _toggle(en=e, v=vis):
-                    v[0] = not v[0]; en.configure(show="" if v[0] else "*")
-                ctk.CTkButton(fp, text="👁", width=30, height=36,
+                    v[0] = not v[0]
+                    en.configure(show="" if v[0] else "*")
+
+                ctk.CTkButton(fp, text="👁", width=44, height=44,
                                fg_color=C_FRAME, hover_color=C_BORDE,
-                               text_color=C_TXT2, font=("Helvetica", 14),
-                               command=_toggle).pack(side="left", padx=(2, 0))
+                               text_color=C_TXT2, font=("Helvetica", 17),
+                               command=_toggle).pack(side="left", padx=(6, 0))
             else:
-                e = ctk.CTkEntry(f, width=160, height=36, font=("Helvetica", 13))
-                e.pack()
+                e = ctk.CTkEntry(f, height=52, font=("Helvetica", 17))
+                e.pack(fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
 
             self._entries[key] = e
 
-        self.lbl_err = ctk.CTkLabel(self.frm_form, text="",
-                                     font=("Helvetica", 11), text_color=C_ERROR)
-        self.lbl_err.pack(pady=6)
-        ctk.CTkButton(self.frm_form, text="Continuar →", width=200, height=44,
-                       fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", 14, "bold"), corner_radius=12,
-                       command=self._validar_form).pack(pady=8)
+        self.lbl_err = ctk.CTkLabel(
+            form_wrap,
+            text="",
+            font=("Helvetica", 13),
+            text_color=C_ERROR,
+        )
+        self.lbl_err.pack(pady=(16, 10))
+
+        ctk.CTkButton(
+            form_wrap,
+            text="Continuar →",
+            width=300,
+            height=62,
+            fg_color=C_OK,
+            text_color=C_BG,
+            hover_color="#00A88A",
+            font=("Helvetica", 22, "bold"),
+            corner_radius=14,
+            command=self._validar_form,
+        ).pack(pady=(8, 0))
+
+        ctk.CTkFrame(form_wrap, fg_color="transparent").pack(fill="both", expand=True)
     def _validar_form(self):
         d = {k: e.get().strip() for k, e in self._entries.items()}
         if not all([d["nombre"], d["apellido_p"], d["matricula"], d["contrasenia"]]):

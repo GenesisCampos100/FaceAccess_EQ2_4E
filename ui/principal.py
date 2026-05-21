@@ -28,7 +28,7 @@ from ui.constantes import (
     FRAMES_CONFIRM, PAUSA_SEG, FALLOS_NUMPAD, EVIDENCIAS_DIR, FOTOS_CAPTURA,
     KB_APP_W, KB_COLS, KB_PAD, KB_BH, KB_FS, KB_ACT_H,
 )
-from ui.constantes import s, sf
+from ui.constantes import s, sf, sw
 from ui.teclado import TecladoVirtual
 from database.db_manager import (
     obtener_usuario_por_id,
@@ -269,8 +269,8 @@ class FaceAccess(ctk.CTk):
         self.ov_registro = ctk.CTkFrame(self.frame_video, fg_color="#0F1923", corner_radius=0)
         ctk.CTkLabel(
             self.ov_registro, text="Registrar nuevo usuario",
-            font=("Helvetica", sf(13, self), "bold"), text_color=C_TXT
-        ).pack(pady=(s(12, self), s(2, self)))
+            font=("Helvetica", sf(60, self), "bold"), text_color=C_TXT
+        ).pack(pady=(s(12, self), s(6, self)))
 
         self.lbl_reg_op = ctk.CTkLabel(
             self.ov_registro, text="",
@@ -280,7 +280,11 @@ class FaceAccess(ctk.CTk):
 
         self._entries = {}
         form_grid = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
-        form_grid.pack(pady=2)
+        form_grid.pack(fill="both", expand=True, padx=s(20, self), pady=s(30, self))
+
+        # Configurar rejilla de 2 columnas para que se expandan uniformemente
+        form_grid.grid_columnconfigure(0, weight=1)
+        form_grid.grid_columnconfigure(1, weight=1)
 
         campos = [
             ("Nombre(s)", "nombre"),
@@ -295,11 +299,12 @@ class FaceAccess(ctk.CTk):
         self._grado_frame = None
         self._grupo_frame = None
 
+        # Colocar cada campo en (row, col) según su índice (2 columnas)
         for i, (lbl, key) in enumerate(campos):
             row = i // 2
             col = i % 2
             f = ctk.CTkFrame(form_grid, fg_color="transparent")
-            f.grid(row=row, column=col, padx=s(20, self), pady=s(3, self), sticky="w")
+            f.grid(row=row, column=col, padx=s(12, self), pady=s(12, self), sticky="ew")
             if key == "grado":
                 self._grado_frame = f
                 f.grid_remove()
@@ -311,9 +316,9 @@ class FaceAccess(ctk.CTk):
 
             if key in ("contrasenia", "contrasenia2"):
                 fp = ctk.CTkFrame(f, fg_color="transparent")
-                fp.pack(anchor="w")
-                e = ctk.CTkEntry(fp, width=s(118, self), height=s(30, self), font=("Helvetica", sf(13, self)), show="*")
-                e.pack(side="left")
+                fp.pack(fill="x")
+                e = ctk.CTkEntry(fp, width=sw(0.88, self), height=s(60, self), font=("Helvetica", sf(22, self)), show="*")
+                e.pack(side="left", fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
                 vis = [False]
 
@@ -322,41 +327,41 @@ class FaceAccess(ctk.CTk):
                     en.configure(show="" if v[0] else "*")
 
                 ctk.CTkButton(
-                    fp, text="👁", width=s(26, self), height=s(30, self),
+                    fp, text="👁", width=s(32, self), height=s(34, self),
                     fg_color=C_FRAME, hover_color=C_BORDE,
                     text_color=C_TXT2, font=("Helvetica", sf(13, self)),
                     command=_toggle
-                ).pack(side="left", padx=(s(2, self), 0))
+                ).pack(side="left", padx=(s(6, self), 0))
             else:
-                e = ctk.CTkEntry(f, width=s(132, self), height=s(30, self), font=("Helvetica", sf(13, self)))
-                e.pack()
+                e = ctk.CTkEntry(f, width=sw(0.92, self), height=s(60, self), font=("Helvetica", sf(22, self)))
+                e.pack(fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
 
             self._entries[key] = e
 
         rol_frame = ctk.CTkFrame(form_grid, fg_color="transparent")
-        rol_frame.grid(row=4, column=0, padx=s(12, self), pady=s(2, self), sticky="w")
+        rol_frame.grid(row=len(campos), column=0, columnspan=2, padx=s(12, self), pady=s(8, self), sticky="w")
         ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", sf(13, self)), text_color=C_TXT2).pack(anchor="w")
         self.combo_rol = ctk.CTkComboBox(
             rol_frame,
-            width=s(132, self),
-            height=s(30, self),
-            font=("Helvetica", sf(13, self)),
+            width=sw(0.8, self),
+            height=s(48, self),
+            font=("Helvetica", sf(22, self)),
             values=["ALUMNO", "PERSONAL_ESCOLAR"],
             command=self._actualizar_campos_rol,
         )
         self.combo_rol.pack()
         self.combo_rol.set("ALUMNO")
 
-        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="", font=("Helvetica", sf(13, self)), text_color=C_ERROR)
-        self.lbl_reg_err.pack(pady=s(1, self))
+        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="", font=("Helvetica", sf(14, self)), text_color=C_ERROR)
+        self.lbl_reg_err.pack(pady=s(4, self))
 
         fb = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
-        fb.pack(pady=s(8, self))
+        fb.pack(pady=s(12, self))
         ctk.CTkButton(
-            fb, text="Continuar →", width=s(140, self), height=s(36, self), fg_color=C_OK,
+            fb, text="Continuar →", width=sw(0.5, self), height=s(44, self), fg_color=C_OK,
             text_color=C_BG, hover_color="#00A88A",
-            font=("Helvetica", sf(13, self), "bold"),
+            font=("Helvetica", sf(22, self), "bold"),
             command=self._reg_continuar
         ).pack(side="left", padx=s(6, self))
 
