@@ -17,7 +17,7 @@ from ui.constantes import (
 
 class TecladoVirtual:
 
-    def __init__(self, root: ctk.CTk):
+    def __init__(self, root):
         self._root   = root
         self._target = None
         self._mayus  = False
@@ -42,8 +42,9 @@ class TecladoVirtual:
         for w in self._frame.winfo_children():
             w.destroy()
         self._renderizar()
-        self._frame.place(relx=0, rely=0.46, relwidth=1, relheight=0.54)
+        self._frame.place(relx=0, rely=0.45, relwidth=1, relheight=0.55)
         self._frame.lift()
+        self._frame.tkraise()
 
     def cerrar(self):
         """Oculta el teclado."""

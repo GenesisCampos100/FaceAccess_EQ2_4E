@@ -24,13 +24,13 @@ C_ADMIN = "#534AB7"
 H_HEADER      = 72
 H_SALUDO      = 40
 H_VIDEO       = 800 - H_HEADER - H_SALUDO
-APP_GEOMETRY  = "380x700"   # usar "480x600" en laptop
+APP_GEOMETRY  = "480x600"   # usar "480x600" en laptop
 
 # ─── Parámetros de visión ─────────────────────────────────────────────────────
 HAAR_CASCADE      = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 ESCALA_DETEC      = 0.5
 MIN_VECINOS       = 5
-MIN_TAMANO_RELAT  = 0.12
+MIN_TAMANO_RELAT  = 0.15
 UMBRAL_CONFIANZA  = 70.0
 
 # ─── Parámetros de flujo ──────────────────────────────────────────────────────
@@ -41,9 +41,9 @@ EVIDENCIAS_DIR  = "evidencias"
 FOTOS_CAPTURA   = 30
 
 # ─── Teclado táctil ───────────────────────────────────────────────────────────
-KB_APP_W   = 480
-KB_COLS    = 11
-KB_PAD     = 4
-KB_BH      = 52     # usar 38 en laptop
-KB_FS      = 16
-KB_ACT_H   = 50     # usar 38 en laptop
+KB_APP_W = 440  # no se usa
+KB_COLS = 10
+KB_PAD  = 2
+KB_BH   = 44
+KB_FS   = 13
+KB_ACT_H   = 48   # ← era 50

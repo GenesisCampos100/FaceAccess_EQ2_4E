@@ -1,3 +1,4 @@
+
 """
 core/reconocimiento.py
 Funciones puras de reconocimiento facial con LBPH.
