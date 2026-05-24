@@ -1810,22 +1810,25 @@ class FaceAccess(ctk.CTk):
             border_color=C_BORDE
         )
         self._ov_confirm.place(relx=0.5, rely=0.5, anchor="center",
-                                relwidth=0.82, relheight=0.35)
+                                relwidth=0.82, relheight=0.24)
         self._ov_confirm.lift()
 
-        ctk.CTkLabel(
-            self._ov_confirm, text="⚠️",
-            font=("Helvetica", 28), fg_color="transparent"
-        ).pack(pady=(18, 4))
+        contenido = ctk.CTkFrame(self._ov_confirm, fg_color="transparent")
+        contenido.place(relx=0.5, rely=0.5, anchor="center")
 
         ctk.CTkLabel(
-            self._ov_confirm, text=mensaje,
+            contenido, text="⚠️",
+            font=("Helvetica", 24), fg_color="transparent"
+        ).pack(pady=(8, 2))
+
+        ctk.CTkLabel(
+            contenido, text=mensaje,
             font=("Helvetica", 15), text_color=C_TXT,
             fg_color="transparent", wraplength=380, justify="center"
-        ).pack(pady=(0, 18))
+        ).pack(pady=(0, 10))
 
-        fb = ctk.CTkFrame(self._ov_confirm, fg_color="transparent")
-        fb.pack()
+        fb = ctk.CTkFrame(contenido, fg_color="transparent")
+        fb.pack(pady=(0, 10))
 
         def _si():
             self._ov_confirm.place_forget()
