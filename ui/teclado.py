@@ -22,14 +22,39 @@ class TecladoVirtual:
         self._target = None
         self._mayus  = False
 
-        # Dimensiones calculadas una vez
-        self._BW    = (KB_APP_W - KB_PAD * (KB_COLS + 1)) // KB_COLS
-        self._BH    = KB_BH
-        self._FS    = KB_FS
-        self._PAD   = KB_PAD
-        self._SPC_W = KB_APP_W - 160
+        # Dimensiones base (se recalculan en abrir)
+        self._APP_W = APP_W
+        # Separacion horizontal minima entre teclas.
+        self._PAD   = max(KB_PAD, 1)
+        # Separacion vertical de teclas: 2x respecto a la horizontal.
+        self._PAD_Y = self._PAD * 2
+        self._BH    = max(KB_BH, 48)
+        self._FS    = max(KB_FS, 16)
+        self._BW    = 52
+        self._SPC_W = 320
+        self._OK_W  = 180
+        self._KBD_W = KB_APP_W
+        self._KBD_H = 360
 
         self._frame = ctk.CTkFrame(root, fg_color="#0A1520", corner_radius=0)
+
+    def _recalcular_dimensiones(self):
+        """Ajustar teclado al ancho real de ventana para centrar y agrandar teclas."""
+        try:
+            self._root.update_idletasks()
+            win_w = self._root.winfo_width()
+            if win_w <= 1:
+                win_w = self._APP_W
+        except Exception:
+            win_w = self._APP_W
+
+        # Ancho del teclado reducido para evitar que quede cargado a los bordes.
+        self._KBD_W = max(480, int(win_w * 0.52))
+        self._BW = max(44, (self._KBD_W - self._PAD * (KB_COLS + 1)) // KB_COLS)
+        self._OK_W = max(150, int(self._KBD_W * 0.28))
+        self._SPC_W = max(220, self._KBD_W - self._OK_W - (self._PAD * 6))
+        # Alto total considerando la separacion vertical ampliada.
+        self._KBD_H = (self._BH * 4) + (self._PAD_Y * 8) + (self._PAD * 3) + 66
 
     # ── API pública ───────────────────────────────────────────────────────────
 
@@ -99,7 +124,8 @@ class TecladoVirtual:
                         border_color=C_BORDE, corner_radius=8,
                         command=lambda t=texto: self._press(t))
 
-                b.grid(row=r_idx, column=c_idx, padx=self._PAD, pady=self._PAD)
+                # Mantiene separacion horizontal compacta y vertical mas respirada.
+                b.grid(row=r_idx, column=c_idx, padx=self._PAD, pady=self._PAD_Y)
 
         # Fila inferior: Espacio + Listo
         fb = ctk.CTkFrame(self._frame, fg_color="transparent")

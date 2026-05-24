@@ -43,7 +43,7 @@ FOTOS_CAPTURA   = 30
 # ─── Teclado táctil ───────────────────────────────────────────────────────────
 KB_APP_W = 440  # no se usa
 KB_COLS = 10
-KB_PAD  = 2
+KB_PAD  = 1
 KB_BH   = 44
 KB_FS   = 13
 KB_ACT_H   = 48   # ← era 50
