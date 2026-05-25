@@ -637,7 +637,9 @@ class FaceAccess(ctk.CTk):
         if self._logo_clicks >= 3:
             self._logo_clicks = 0
             self._logo_timer  = None
-            self._abrir_login()
+            #self._abrir_login()
+            command=lambda: self._abrir_registro({ "id_usuario": 1, "nombre": "Administrador", "apellido_p": "Prueba", "nombre_rol": "ADMIN", "id_rol": 1 })
+        
         else:
             self._logo_timer = self.after(2000, self._logo_reset)
 

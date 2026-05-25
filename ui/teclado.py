@@ -23,7 +23,7 @@ class TecladoVirtual:
         self._mayus  = False
 
         # Dimensiones base (se recalculan en abrir)
-        self._APP_W = APP_W
+        self._APP_W = KB_APP_W
         # Separacion horizontal minima entre teclas.
         self._PAD   = max(KB_PAD, 1)
         # Separacion vertical de teclas: 2x respecto a la horizontal.
