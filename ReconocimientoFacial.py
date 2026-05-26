@@ -21,6 +21,7 @@ import customtkinter as ctk
 from PIL import Image
 from collections import Counter
 from datetime import datetime
+from ui.panel_admin import PanelAdmin
 
 # ── Módulos propios ───────────────────────────────────────────────────────────
 from core.reconocimiento import cargar_encodings, buscar
@@ -261,9 +262,9 @@ class FaceAccess(ctk.CTk):
             try:
                 frame = self._queue_frames.get(timeout=0.5)
             except:
-                print("[HILO] Sin frames en queue")  # ← agrega esto
+                
                 continue
-            print("[HILO] Frame recibido")  # ← y esto
+            
 
             gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
@@ -691,6 +692,7 @@ class FaceAccess(ctk.CTk):
         self._build_ov_login()
         self._build_ov_registro()
         self._build_ov_captura()
+        self._build_panel_admin()
 
     # ── Overlay de mensaje ────────────────────────────────────────────────────
 
@@ -1128,7 +1130,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_login_status.configure(text="✓ Identidad confirmada", text_color=C_OK)
         print(f"[LOGIN] Acceso concedido: {self._login_usuario['nombre']} (conf: {confianza:.1f})")
         self._login_validando = False
-        self.after(800, lambda: self._abrir_registro(self._login_usuario))
+        self.after(800, lambda: self._abrir_panel_admin(self._login_usuario))
 
     def _resetear_login_form(self):
         self._login_frames_confirmados = 0
@@ -1557,8 +1559,7 @@ class FaceAccess(ctk.CTk):
             e.delete(0, "end")
         self.combo_rol.set("ALUMNO")
         self._actualizar_campos_rol("ALUMNO")
-        self._modo = "registro"
-        self.ov_registro.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._abrir_panel_admin(self._login_usuario)
 
     def _validar_rostro_duplicado(self):
         if not self._cap_imagenes or self._recognizer is None:
@@ -1642,10 +1643,28 @@ class FaceAccess(ctk.CTk):
                 text="", text_color=C_TXT2))
 
     # ── Estado y helpers UI ───────────────────────────────────────────────────
+    def _build_panel_admin(self):
+        self._panel_admin = PanelAdmin(
+            parent=self.frame_video,
+            on_nuevo_usuario=self._panel_ir_registro,
+            on_cerrar=self._cancelar_modo,
+        )
+
+    def _panel_ir_registro(self):
+        """Desde panel admin → formulario de registro."""
+        self._panel_admin.cerrar()
+        self._abrir_registro(self._login_usuario)
+
+    def _abrir_panel_admin(self, operador):
+        """Se llama tras login facial exitoso — muestra el panel."""
+        self._modo = "panel_admin"
+        self._panel_admin.abrir(operador)
 
     def _ocultar_overlays(self):
         for ov in [self.ov_numpad, self.ov_login, self.ov_registro, self.ov_captura]:
             ov.place_forget()
+        if hasattr(self, "_panel_admin"):   # ← AGREGAR estas 2 líneas
+            self._panel_admin.cerrar()
         self._ocultar_alerta_duplicado()
         self._ocultar_msg()
         if hasattr(self, "_ov_teclado") and self._ov_teclado.winfo_ismapped():
