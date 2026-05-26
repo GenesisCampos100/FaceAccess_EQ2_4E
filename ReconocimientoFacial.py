@@ -332,8 +332,8 @@ class FaceAccess(ctk.CTk):
 
         h_sm, w_sm = gray_small.shape[:2]
         min_size = (
-            max(int(w_sm * MIN_TAMANO_RELAT), 20),
-            max(int(h_sm * MIN_TAMANO_RELAT), 20)
+            max(int(w_sm * MIN_TAMANO_RELAT), 10),
+            max(int(h_sm * MIN_TAMANO_RELAT), 10)
         )
 
         with self._lock_coords:
@@ -349,13 +349,13 @@ class FaceAccess(ctk.CTk):
             roi = gray_small[y_roi:y2_roi, x_roi:x2_roi]
             if roi.size > 0:
                 rostros_roi = self._detector.detectMultiScale(
-                    roi, scaleFactor=1.1, minNeighbors=MIN_VECINOS, minSize=min_size)
+                    roi, scaleFactor=1.05, minNeighbors=MIN_VECINOS, minSize=min_size)
                 if len(rostros_roi) > 0:
                     x, y, w, h = max(rostros_roi, key=lambda r: r[2] * r[3])
                     return (x + x_roi, y + y_roi, w, h)
 
         rostros = self._detector.detectMultiScale(
-            gray_small, scaleFactor=1.1, minNeighbors=MIN_VECINOS, minSize=min_size)
+            gray_small, scaleFactor=1.05, minNeighbors=MIN_VECINOS, minSize=min_size)
 
         if len(rostros) == 0:
             return None
@@ -1143,6 +1143,15 @@ class FaceAccess(ctk.CTk):
         self.btn_login_confirmar.configure(state="normal")
 
     def _cancelar_modo(self):
+        if getattr(self, "_reg_cancelar_destino", None) == "panel" \
+                and self._login_usuario:
+            self._reg_cancelar_destino = None
+            self._ocultar_overlays()
+            self._modo = "panel_admin"
+            self._panel_admin.abrir(self._login_usuario)
+            return
+        self._reg_cancelar_destino = None
+        
         modo_anterior = self._modo
         self._ocultar_overlays()
         self._modo    = "acceso"
@@ -1653,6 +1662,7 @@ class FaceAccess(ctk.CTk):
     def _panel_ir_registro(self):
         """Desde panel admin → formulario de registro."""
         self._panel_admin.cerrar()
+        self._reg_cancelar_destino = "panel"
         self._abrir_registro(self._login_usuario)
 
     def _abrir_panel_admin(self, operador):
