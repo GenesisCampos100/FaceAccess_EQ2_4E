@@ -24,7 +24,7 @@ C_ADMIN = "#534AB7"
 H_HEADER      = 72
 H_SALUDO      = 40
 H_VIDEO       = 800 - H_HEADER - H_SALUDO
-APP_GEOMETRY  = "480x600"   # usar "480x600" en laptop
+APP_GEOMETRY  = "400x724"   # usar "480x600" en laptop
 
 # ─── Parámetros de visión ─────────────────────────────────────────────────────
 HAAR_CASCADE      = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
