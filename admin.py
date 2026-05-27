@@ -179,7 +179,7 @@ class AdminSetup(ctk.CTk):
     def _detectar(self, gray_small):
         if self._detector is None: return None
         h_sm, w_sm = gray_small.shape[:2]
-        min_size = (max(int(w_sm * MIN_TAMANO_RELAT), 20), max(int(h_sm * MIN_TAMANO_RELAT), 20))
+        min_size = (max(int(w_sm * MIN_TAMANO_RELAT), 10), max(int(h_sm * MIN_TAMANO_RELAT), 10))
         rostros = self._detector.detectMultiScale(
             gray_small, scaleFactor=1.1, minNeighbors=MIN_VECINOS, minSize=min_size)
         if len(rostros) == 0: return None

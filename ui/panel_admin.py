@@ -41,7 +41,7 @@ class PanelAdmin(ctk.CTkFrame):
         ctk.CTkButton(hdr, text="✕ Salir", width=px(80), height=px(30),
                        fg_color="transparent", text_color=C_TXT2,
                        hover_color=C_BORDE, font=("Helvetica", fs(11)),
-                       command=self._on_cerrar).pack(side="right", padx=px(10))
+                       command=self._confirmar_salir).pack(side="right", padx=px(10))
 
         # ── Barra de tabs ─────────────────────────────────────────────────────
         tab_bar = ctk.CTkFrame(self, fg_color=C_FOOT, corner_radius=0, height=px(44))
@@ -72,6 +72,15 @@ class PanelAdmin(ctk.CTkFrame):
         self._frame_accesos  = self._build_tab_accesos()
 
     # ── Tab: Nuevo usuario ────────────────────────────────────────────────────
+
+    def _confirmar_salir(self):
+        if hasattr(self, "_on_confirmar_salir"):
+            self._on_confirmar_salir()
+        else:
+            self._mostrar_confirm(
+                mensaje="¿Cerrar el panel y volver al reconocimiento?",
+                accion_si=self._on_cerrar
+            )
 
     def _build_tab_nuevo(self):
         f = ctk.CTkFrame(self._contenido, fg_color="transparent")
@@ -158,7 +167,7 @@ class PanelAdmin(ctk.CTkFrame):
                           fg_color="transparent", width=px(100)).pack(side="left")
 
             if activo:
-                ctk.CTkButton(row, text="Dar baja", width=px(68), height=px(26),
+                ctk.CTkButton(row, text="X", width=px(68), height=px(26),
                                fg_color=C_ERROR, text_color="white",
                                hover_color="#a00000", font=("Helvetica", fs(10)),
                                corner_radius=6,
@@ -168,37 +177,60 @@ class PanelAdmin(ctk.CTkFrame):
                 ctk.CTkLabel(row, text="Inactivo", font=("Helvetica", fs(10)),
                               text_color=C_TXT3, fg_color="transparent",
                               width=px(68)).pack(side="right", padx=px(6))
-
+    
     def _confirmar_baja(self, id_usuario, nombre):
-        """Mini-diálogo de confirmación dentro del scroll."""
-        dlg = ctk.CTkToplevel(self)
-        dlg.title("Confirmar baja")
-        dlg.geometry(f"{px(300)}x{px(160)}")
-        dlg.resizable(False, False)
-        dlg.configure(fg_color=C_FRAME)
-        dlg.grab_set()
+        """CAMBIO: overlay interno en lugar de CTkToplevel."""
+        self._mostrar_confirm(
+            mensaje=f"¿Dar de baja a\n{nombre}?\n\nSu historial se conservará.",
+            accion_si=lambda: self._ejecutar_baja(id_usuario)
+            )
 
-        ctk.CTkLabel(dlg, text=f"¿Dar de baja a\n{nombre}?",
-                     font=("Helvetica", fs(12)), text_color=C_TXT,
-                     justify="center").pack(pady=(px(20), px(16)))
+    def _ejecutar_baja(self, id_usuario):
+        desactivar_usuario(id_usuario)
+        self._cargar_usuarios()
 
-        fb = ctk.CTkFrame(dlg, fg_color="transparent")
+    def _mostrar_confirm(self, mensaje, accion_si):
+        """Overlay de confirmación centrado dentro del panel."""
+        if hasattr(self, "_ov_confirm") and self._ov_confirm \
+                and self._ov_confirm.winfo_exists():
+            self._ov_confirm.destroy()
+
+        self._ov_confirm = ctk.CTkFrame(
+            self, fg_color=C_FRAME, corner_radius=16,
+            border_width=2, border_color=C_BORDE)
+        self._ov_confirm.place(relx=0.5, rely=0.5, anchor="center",
+                                relwidth=0.82, relheight=0.38)
+        self._ov_confirm.lift()
+
+        ctk.CTkLabel(self._ov_confirm, text="⚠️",
+                    font=("Helvetica", fs(28)),
+                    fg_color="transparent").pack(pady=(px(16), px(4)))
+        ctk.CTkLabel(self._ov_confirm, text=mensaje,
+                    font=("Helvetica", fs(12)), text_color=C_TXT,
+                    fg_color="transparent", wraplength=px(260),
+                    justify="center").pack(pady=(0, px(16)))
+
+        fb = ctk.CTkFrame(self._ov_confirm, fg_color="transparent")
         fb.pack()
 
         def _si():
-            desactivar_usuario(id_usuario)
-            dlg.destroy()
-            self._cargar_usuarios()
+            self._ov_confirm.destroy()
+            self._ov_confirm = None
+            accion_si()
 
-        ctk.CTkButton(fb, text="Sí, dar baja", width=px(110), height=px(36),
-                       fg_color=C_ERROR, text_color="white",
-                       hover_color="#a00000", font=("Helvetica", fs(11), "bold"),
-                       command=_si).pack(side="left", padx=px(6))
-        ctk.CTkButton(fb, text="Cancelar", width=px(110), height=px(36),
-                       fg_color="transparent", text_color=C_TXT2,
-                       hover_color=C_BORDE, font=("Helvetica", fs(11)),
-                       command=dlg.destroy).pack(side="left", padx=px(6))
+        def _no():
+            self._ov_confirm.destroy()
+            self._ov_confirm = None
 
+        ctk.CTkButton(fb, text="Sí", width=px(110), height=px(36),
+                    fg_color=C_ERROR, text_color="white",
+                    hover_color="#a00000", font=("Helvetica", fs(12), "bold"),
+                    command=_si).pack(side="left", padx=px(6))
+        ctk.CTkButton(fb, text="No, continuar", width=px(120), height=px(36),
+                    fg_color=C_OK, text_color=C_BG,
+                    hover_color="#00A88A", font=("Helvetica", fs(12), "bold"),
+                    command=_no).pack(side="left", padx=px(6))
+    
     # ── Tab: Accesos ──────────────────────────────────────────────────────────
 
     def _build_tab_accesos(self):
