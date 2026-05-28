@@ -113,7 +113,7 @@ def sf(font_size, parent):
         if w <= 1:
             w = int(APP_GEOMETRY.split('x')[0])
         # Escala lineal: en ventana 480 devuelve el tamaño base, en otras ajusta proporcionalmente
-        return int(font_size * w / 480)
+        return int(round(font_size * w / 480 * 1.5))
     except:
         return int(font_size)
 

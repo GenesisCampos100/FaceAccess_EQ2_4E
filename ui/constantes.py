@@ -34,12 +34,13 @@ C_ADMIN = "#534AB7"
 SCREEN_W = 600
 SCREEN_H = 1042
 _S       = 1.0  # sin escala, tamaño de diseño original
+_FONT_SCALE = float(os.getenv("FACEACCESS_FONT_SCALE", "1.5"))
 
 def px(n: float) -> int:
     return max(int(n * _S), 1)
 
 def fs(n: float) -> int:
-    return max(int(n * _S), 7)
+	return max(int(n * _S * _FONT_SCALE), 7)
 
 # ─── Dimensiones de pantalla ──────────────────────────────────────────────────
 _DEFAULT_GEOMETRY = os.getenv("FACEACCESS_GEOMETRY", "600x1042")
