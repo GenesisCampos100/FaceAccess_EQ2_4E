@@ -13,6 +13,8 @@ Módulos externos:
 
 import cv2
 import os
+import ctypes
+import sys
 import threading
 import time
 import numpy as np
@@ -125,8 +127,15 @@ class FaceAccess(ctk.CTk):
         self.geometry(APP_GEOMETRY)
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
-        self.attributes("-fullscreen", True)
-        self.bind("<Escape>", lambda e: self.attributes("-fullscreen", False))
+        self._fullscreen_kiosko = os.getenv("FACEACCESS_FULLSCREEN", "0").lower() in ("1", "true", "yes", "on")
+        self._monitor_vertical = self.winfo_screenheight() >= self.winfo_screenwidth()
+        self._kiosko_activo = False
+        if self._fullscreen_kiosko or self._monitor_vertical:
+            self._activar_modo_kiosko()
+        else:
+            self.after(0, self._centrar_ventana)
+        self.bind("<F11>", self._alternar_pantalla_completa)
+        self.bind("<Escape>", self._salir_pantalla_completa)
 
         # ── Estado de la aplicación ───────────────────────────────────────────
         self.estado          = "escaneando"
@@ -215,6 +224,66 @@ class FaceAccess(ctk.CTk):
             return None
         print("[MOTOR] Haar Cascade activo.")
         return detector
+
+    def _centrar_ventana(self):
+        self.update_idletasks()
+        try:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            w = APP_GEOMETRY.split("x", 1)[0]
+            h = APP_GEOMETRY.split("x", 1)[1]
+            w = int(w)
+            h = int(h)
+            x = max((sw - w) // 2, 0)
+            y = max((sh - h) // 2, 0)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            self.geometry(APP_GEOMETRY)
+
+    def _ocultar_barra_tareas(self):
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)
+            except Exception:
+                pass
+
+    def _mostrar_barra_tareas(self):
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 5)
+            except Exception:
+                pass
+
+    def _activar_modo_kiosko(self):
+        self._kiosko_activo = True
+        self.overrideredirect(True)
+        self._ocultar_barra_tareas()
+        self.attributes("-fullscreen", False)
+        self._centrar_ventana()
+        self.focus_force()
+
+    def _desactivar_modo_kiosko(self):
+        self._kiosko_activo = False
+        self.attributes("-fullscreen", False)
+        self.overrideredirect(False)
+        self._mostrar_barra_tareas()
+        self._centrar_ventana()
+        self.update_idletasks()
+
+    def _alternar_pantalla_completa(self, event=None):
+        if self._kiosko_activo:
+            self._desactivar_modo_kiosko()
+        else:
+            self._activar_modo_kiosko()
+        return "break"
+
+    def _salir_pantalla_completa(self, event=None):
+        self._desactivar_modo_kiosko()
+        return "break"
 
     def _iniciar(self):
         self._camara.iniciar(lock=self._lock)
@@ -944,6 +1013,8 @@ class FaceAccess(ctk.CTk):
                                    font=("Helvetica", sf(18, self), "bold"), text_color=C_TXT,
                                    fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(46, self))
         self.lbl_np.pack(pady=(10, 18))
+        self.lbl_np.bind("<Button-1>", self._abrir_teclado_manual)
+        self._np_inner.bind("<Button-1>", self._abrir_teclado_manual)
 
         self._np_var = tk.StringVar(value="")
         self._np_var.trace_add("write", lambda *args: self.lbl_np.configure(text=self._np_var.get()))
@@ -970,7 +1041,12 @@ class FaceAccess(ctk.CTk):
         self._esperando_numpad = False
         self._ocultar_msg()
         self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self._teclado.abrir(self._np_entry_proxy)
+        self._abrir_teclado_manual()
+
+    def _abrir_teclado_manual(self, event=None):
+        if getattr(self, "ov_numpad", None) is not None and self.ov_numpad.winfo_ismapped():
+            self._teclado.abrir(self._np_entry_proxy)
+            return "break"
 
     def _np_press(self, t):
         if len(self._np_val) < 15:
@@ -1127,13 +1203,13 @@ class FaceAccess(ctk.CTk):
             self.ov_login_captura,
             fg_color="#0A1520",
             width=520,
-            height=px(110)
+            height=px(100)
         )
 
         panel.place(
             relx=0.5,
-            rely=1,
-            anchor="s",
+            rely=0.42,
+            anchor="center",
             relwidth=1
         )
         
@@ -1144,19 +1220,19 @@ class FaceAccess(ctk.CTk):
         self.lbl_login_cap_instruc = ctk.CTkLabel(
             panel,
             text="Acerca tu rostro a la cámara",
-            font=("Helvetica", 22, "bold"),
+            font=("Helvetica", 18, "bold"),
             text_color="white"
         )
-        self.lbl_login_cap_instruc.pack(side="top", pady=(px(12), px(4)), expand=False)
+        self.lbl_login_cap_instruc.pack(side="top", pady=(px(10), px(2)), expand=False)
 
         # Estado
         self.lbl_login_cap_estado = ctk.CTkLabel(
             panel,
             text="● Escaneando...",
-            font=("Helvetica", 14),
+            font=("Helvetica", 12),
             text_color=C_OK
         )
-        self.lbl_login_cap_estado.pack(side="top", expand=False, pady=(px(4), px(12)))
+        self.lbl_login_cap_estado.pack(side="top", expand=False, pady=(px(2), px(8)))
 
        
     def _abrir_login(self):

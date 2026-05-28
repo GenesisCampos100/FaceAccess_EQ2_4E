@@ -31,8 +31,8 @@ C_ADMIN = "#534AB7"
 # _S = min(SCREEN_W / 480, SCREEN_H / 800)
 
 # ── PRUEBAS en laptop — comentar esto en producción ───────────────────────────
-SCREEN_W = 480
-SCREEN_H = 600
+SCREEN_W = 600
+SCREEN_H = 1042
 _S       = 1.0  # sin escala, tamaño de diseño original
 
 def px(n: float) -> int:
@@ -42,18 +42,18 @@ def fs(n: float) -> int:
     return max(int(n * _S), 7)
 
 # ─── Dimensiones de pantalla ──────────────────────────────────────────────────
-_DEFAULT_GEOMETRY = os.getenv("FACEACCESS_GEOMETRY", "600x1024")
+_DEFAULT_GEOMETRY = os.getenv("FACEACCESS_GEOMETRY", "600x1042")
 try:
 	APP_W, APP_H = (max(1, int(part)) for part in _DEFAULT_GEOMETRY.lower().split("x", 1))
 except ValueError:
-	APP_W, APP_H = 600, 1024
+	APP_W, APP_H = 600, 1042
 APP_GEOMETRY = f"{APP_W}x{APP_H}"
 
 # Para laptop de pruebas: cambiar H_HEADER=58, H_SALUDO=34, APP_GEOMETRY="480x600"
 H_HEADER      = 72
 H_SALUDO      = 40
-H_VIDEO       = 800 - H_HEADER - H_SALUDO
-H_FOOTER      = max(APP_H - H_HEADER - H_SALUDO - H_VIDEO, 0)
+H_FOOTER      = max(80, int(APP_H * 0.085))
+H_VIDEO       = max(APP_H - H_HEADER - H_SALUDO - H_FOOTER, 1)
 
 
 def _calc_scale(root=None):
@@ -69,7 +69,8 @@ def _calc_scale(root=None):
 		sh = root.winfo_screenheight()
 		if APP_W <= 0 or APP_H <= 0:
 			return 1.0
-		return min(sw / APP_W, sh / APP_H)
+		scale = min(sw / APP_W, sh / APP_H)
+		return min(scale, 1.0)
 	except Exception:
 		return 1.0
 

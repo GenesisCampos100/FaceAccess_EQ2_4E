@@ -3,7 +3,7 @@ admin.py — Setup inicial del primer administrador.
 Corre UNA sola vez desde main.py cuando la BD está vacía.
 """
 
-import cv2, os, sys, numpy as np, customtkinter as ctk
+import cv2, os, sys, ctypes, numpy as np, customtkinter as ctk
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,8 +31,15 @@ class AdminSetup(ctk.CTk):
         self.geometry(APP_GEOMETRY)
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
-        self.attributes("-fullscreen", True)
-        self.bind("<Escape>", lambda e: self.attributes("-fullscreen", False))
+        self._fullscreen_kiosko = os.getenv("FACEACCESS_FULLSCREEN", "0").lower() in ("1", "true", "yes", "on")
+        self._monitor_vertical = self.winfo_screenheight() >= self.winfo_screenwidth()
+        self._kiosko_activo = False
+        if self._fullscreen_kiosko or self._monitor_vertical:
+            self._activar_modo_kiosko()
+        else:
+            self.after(0, self._centrar_ventana)
+        self.bind("<F11>", self._alternar_pantalla_completa)
+        self.bind("<Escape>", self._salir_pantalla_completa)
         self.protocol("WM_DELETE_WINDOW", self._cerrar)
 
         self._camara  = CamaraManager()
@@ -194,6 +201,66 @@ class AdminSetup(ctk.CTk):
         self.lbl_cap_estado = ctk.CTkLabel(body, text="",
                                             font=("Helvetica", 13, "bold"), text_color=C_OK)
         self.lbl_cap_estado.pack(pady=(6, 0))
+
+    def _centrar_ventana(self):
+        self.update_idletasks()
+        try:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            w = APP_GEOMETRY.split("x", 1)[0]
+            h = APP_GEOMETRY.split("x", 1)[1]
+            w = int(w)
+            h = int(h)
+            x = max((sw - w) // 2, 0)
+            y = max((sh - h) // 2, 0)
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            self.geometry(APP_GEOMETRY)
+
+    def _ocultar_barra_tareas(self):
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)
+            except Exception:
+                pass
+
+    def _mostrar_barra_tareas(self):
+        if sys.platform.startswith("win"):
+            try:
+                hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 5)
+            except Exception:
+                pass
+
+    def _activar_modo_kiosko(self):
+        self._kiosko_activo = True
+        self.overrideredirect(True)
+        self._ocultar_barra_tareas()
+        self.attributes("-fullscreen", False)
+        self._centrar_ventana()
+        self.focus_force()
+
+    def _desactivar_modo_kiosko(self):
+        self._kiosko_activo = False
+        self.attributes("-fullscreen", False)
+        self.overrideredirect(False)
+        self._mostrar_barra_tareas()
+        self._centrar_ventana()
+        self.update_idletasks()
+
+    def _alternar_pantalla_completa(self, event=None):
+        if self._kiosko_activo:
+            self._desactivar_modo_kiosko()
+        else:
+            self._activar_modo_kiosko()
+        return "break"
+
+    def _salir_pantalla_completa(self, event=None):
+        self._desactivar_modo_kiosko()
+        return "break"
 
     def _abrir_captura(self):
         self._cap_imagenes = []; self._cap_count = 0
