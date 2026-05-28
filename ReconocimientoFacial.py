@@ -18,6 +18,7 @@ import time
 import numpy as np
 from queue import Queue
 import customtkinter as ctk
+import tkinter as tk
 from PIL import Image
 from collections import Counter
 from datetime import datetime
@@ -925,155 +926,49 @@ class FaceAccess(ctk.CTk):
         # Overlay que contiene un contenedor centralizado para el campo y teclado
         self.ov_numpad = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
 
-        # Contenedor centrado con ancho relativo a la ventana (90% del ancho objetivo)
-        # Contenedor mas compacto para no saturar los bordes en pantalla pequena.
-        cont_w = sw(0.88, self)
+        # Contenedor más contenido para que el bloque no se vea desbordado.
+        cont_w = sw(0.78, self)
         self._np_inner = ctk.CTkFrame(self.ov_numpad, fg_color="transparent", width=cont_w)
-        self._np_inner.place(relx=0.5, rely=0.16, anchor="n")
+        self._np_inner.place(relx=0.5, rely=0.24, anchor="n")
 
-        # Tipografia ampliada para uso tactil.
+        # Escala alineada con los inputs del formulario de admin.
         ctk.CTkLabel(self._np_inner, text="Acceso manual",
-                 font=("Helvetica", sf(20, self), "bold"), text_color=C_TXT).pack(pady=(8, 3))
+                     font=("Helvetica", sf(16, self), "bold"), text_color=C_TXT).pack(pady=(8, 6))
         ctk.CTkLabel(self._np_inner, text="Ingresa tu matrícula",
-                 font=("Helvetica", sf(15, self)), text_color=C_TXT2).pack()
+                     font=("Helvetica", sf(11, self)), text_color=C_TXT2).pack(pady=(0, 16))
 
-        lbl_w = int(cont_w * 0.95)
+        lbl_w = int(cont_w * 0.50)
         self.lbl_np = ctk.CTkLabel(self._np_inner, text="",
-                font=("Helvetica", sf(30, self), "bold"), text_color=C_TXT,
-                fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(60, self))
-        self.lbl_np.pack(pady=(8, 8))
+                                   font=("Helvetica", sf(18, self), "bold"), text_color=C_TXT,
+                                   fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(46, self))
+        self.lbl_np.pack(pady=(10, 18))
+
+        self._np_var = tk.StringVar(value="")
+        self._np_var.trace_add("write", lambda *args: self.lbl_np.configure(text=self._np_var.get()))
+        self._np_entry_proxy = ctk.CTkEntry(self.ov_numpad, textvariable=self._np_var)
 
         # Botones de acción debajo del input
         fa = ctk.CTkFrame(self._np_inner, fg_color="transparent")
-        fa.pack(pady=(4, 6))
+        fa.pack(pady=(12, 0))
 
-        # Marco para el teclado que quedará centrado y con ancho del contenedor
-        self._np_kb_frame = ctk.CTkFrame(self.ov_numpad, fg_color="transparent", width=cont_w)
-        # posicionamos el teclado un poco más arriba (proporción similar a la otra captura)
-        self._np_kb_frame.place(relx=0.5, rely=0.68, anchor="n")
-        self._np_botones = {}
-        self._np_renderizar_teclado()
-
-        ctk.CTkButton(fa, text="Cancelar", width=int(cont_w * 0.24), height=s(self._KB_ACT_H + 4, self),
-                       fg_color="transparent", text_color=C_TXT2, hover_color=C_FRAME,
-                       font=("Helvetica", sf(15, self)),
-                       command=lambda: self._confirmar_cancelar(
-                           "¿Cancelar acceso manual y volver al escaneo?",
-                           accion_si=self._np_cancelar)).pack(side="left", padx=8)
-        ctk.CTkButton(fa, text="OK  ✓", width=int(cont_w * 0.32), height=s(self._KB_ACT_H + 4, self),
-                       fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", sf(16, self), "bold"), corner_radius=10,
-                       command=self._np_ok).pack(side="left", padx=8)
-
-    def _np_renderizar_teclado(self):
-        for w in self._np_kb_frame.winfo_children():
-            w.destroy()
-        self._np_botones.clear()
-
-        # Calcular dimensiones relativas según el ancho del contenedor central
-        # Aumentamos el ancho del contenedor para que ocupe casi todo el ancho visual
-        cont_w = self._np_kb_frame.winfo_width() or sw(0.94, self)
-        PAD = max(1, s(KB_PAD, self))
-        # Separacion vertical de teclas al doble para mejor toque.
-        PAD_Y = PAD * 2
-        cols = KB_COLS
-        # permitir teclas grandes y con buen espaciado
-        BW = max(42, (cont_w - PAD * (cols + 1)) // cols)
-        BH = s(KB_BH + 6, self)
-        FS = sf(KB_FS + 2, self)
-        self._np_kb_frame.grid_columnconfigure(0, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(1, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(2, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(3, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(4, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(5, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(6, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(7, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(8, weight=1, uniform="kb")
-        self._np_kb_frame.grid_columnconfigure(9, weight=1, uniform="kb")
-        filas = [
-                ["1","2","3","4","5","6","7","8","9","0"],
-                ["Q","W","E","R","T","Y","U","I","O","P"],
-                ["A","S","D","F","G","H","J","K","L","⌫"],  # ← ⌫ aquí
-                ["⇧","Z","X","C","V","B","N","M","-","_"],
-       ]   
-
-        for r_idx, fila in enumerate(filas):
-            for c_idx, tecla in enumerate(fila):
-                texto = tecla
-                if tecla.isalpha():
-                    texto = tecla if self._np_mayus else tecla.lower()
-
-                if tecla == "⌫":
-                    btn = ctk.CTkButton(self._np_kb_frame, text=tecla,
-                                        width=BW+8, height=BH, font=("Helvetica", FS),
-                                        fg_color=C_FRAME, text_color=C_ERROR,
-                                        hover_color=C_BORDE, border_width=1,
-                                        border_color=C_BORDE, corner_radius=8,
-                                        command=self._np_del)
-                elif tecla == "⇧":
-                    btn = ctk.CTkButton(self._np_kb_frame, text=tecla,
-                                        width=BW+8, height=BH, font=("Helvetica", FS),
-                                        fg_color=C_OK if self._np_mayus else C_FRAME,
-                                        text_color=C_BG if self._np_mayus else C_TXT,
-                                        hover_color=C_BORDE, border_width=1,
-                                        border_color=C_BORDE, corner_radius=8,
-                                        command=self._np_toggle_mayus)
-                else:
-                    btn = ctk.CTkButton(self._np_kb_frame, text=texto,
-                                        width=BW, height=BH,
-                                        font=("Helvetica", FS, "bold"),
-                                        fg_color=C_FRAME, text_color=C_TXT,
-                                        hover_color=C_BORDE, border_width=1,
-                                        border_color=C_BORDE, corner_radius=8,
-                                        command=lambda t=texto: self._np_press(t))
-                # Horizontal compacto, vertical amplio.
-                btn.grid(row=r_idx, column=c_idx, padx=PAD, pady=PAD_Y)
-                self._np_botones[tecla] = btn
-
-            # Fila inferior: Espacio (gran botón) y Listo (confirmación) a la derecha
-            # Espacio ocupa la mayor parte (columnspan=8) y Listo columna 8-9
-        fb = ctk.CTkFrame(self._np_kb_frame, fg_color="transparent")
-        fb.grid(row=len(filas), column=0, columnspan=10,
-            padx=PAD, pady=(3, 7), sticky="ew")
-        fb.grid_columnconfigure(0, weight=1)
-        fb.grid_columnconfigure(1, weight=0)
-        fb.grid_columnconfigure(2, weight=0)
-        fb.grid_columnconfigure(3, weight=1)
-
-        space_btn = ctk.CTkButton(
-            fb, text="Espacio",
-            width=max(210, int(cont_w * 0.60)), height=s(66, self),
-            font=("Helvetica", FS),
-            fg_color=C_FRAME, text_color=C_TXT,
-            hover_color=C_BORDE, border_width=1,
-            border_color=C_BORDE, corner_radius=8,
-            command=lambda: self._np_press(' ')
-        )
-        space_btn.grid(row=0, column=1, padx=self._PAD if hasattr(self, "_PAD") else PAD)
-        self._np_botones['SPACE'] = space_btn
-
-        listo_btn = ctk.CTkButton(
-            fb, text="Listo ✓",
-            width=max(145, int(cont_w * 0.27)), height=s(66, self),
-            font=("Helvetica", FS, "bold"),
-            fg_color=C_OK, text_color=C_BG,
-            hover_color="#00A88A", corner_radius=8,
-            command=self._np_ok
-        )
-        listo_btn.grid(row=0, column=2, padx=self._PAD if hasattr(self, "_PAD") else PAD)
-        self._np_botones['LISTO'] = listo_btn
-
-    def _np_toggle_mayus(self):
-        self._np_mayus = not self._np_mayus
-        self._np_renderizar_teclado()
+        ctk.CTkButton(fa, text="Cancelar", width=int(cont_w * 0.21), height=s(46, self),
+                      fg_color="transparent", text_color=C_TXT2, hover_color=C_FRAME,
+                      font=("Helvetica", sf(11, self)),
+                      command=lambda: self._confirmar_cancelar(
+                          "¿Cancelar acceso manual y volver al escaneo?",
+                          accion_si=self._np_cancelar)).pack(side="left", padx=8)
+        ctk.CTkButton(fa, text="OK  ✓", width=int(cont_w * 0.27), height=s(46, self),
+                      fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
+                      font=("Helvetica", sf(12, self), "bold"), corner_radius=10,
+                      command=self._np_ok).pack(side="left", padx=8)
 
     def _mostrar_numpad(self):
-        self._np_val = ""; self.lbl_np.configure(text="")
+        self._np_val = ""; self._np_var.set(""); self.lbl_np.configure(text="")
         self._en_pausa = True; self._np_vis = True
         self._esperando_numpad = False
         self._ocultar_msg()
         self.ov_numpad.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._teclado.abrir(self._np_entry_proxy)
 
     def _np_press(self, t):
         if len(self._np_val) < 15:
@@ -1085,6 +980,7 @@ class FaceAccess(ctk.CTk):
 
     def _np_ok(self):
         mat = self._np_val
+        self._teclado.cerrar()
         self.ov_numpad.place_forget(); self._np_vis = False
         self._en_pausa = False; self.fallos = 0
         u = obtener_usuario_por_matricula(mat)
@@ -1111,6 +1007,7 @@ class FaceAccess(ctk.CTk):
         self._en_pausa = True; self._t_pausa = datetime.now()
 
     def _np_cancelar(self):
+        self._teclado.cerrar()
         self.ov_numpad.place_forget(); self._np_vis = False; self._en_pausa = False
         self.fallos = 0; self._esperando_numpad = False
         self._buffer = []; self._frames_desc = 0
@@ -1120,50 +1017,54 @@ class FaceAccess(ctk.CTk):
     def _build_ov_login(self):
         self.ov_login = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
         self.ov_login_form = ctk.CTkFrame(self.ov_login, fg_color="transparent")
-        self.ov_login_form.pack(fill="both", expand=True)
+        self.ov_login_form.place(relx=0.5, rely=0.52, anchor="center", relwidth=0.88, relheight=0.82)
+        self.ov_login_form.pack_propagate(False)
 
-        ctk.CTkLabel(self.ov_login_form, text="Acceso administrativo",
-                     font=("Helvetica", fs(18), "bold"), text_color=C_TXT).pack(pady=(px(38), px(6)))
-        ctk.CTkLabel(self.ov_login_form,
+        content = ctk.CTkFrame(self.ov_login_form, fg_color="transparent")
+        content.place(relx=0.5, rely=0.54, anchor="center", relwidth=0.96, relheight=0.92)
+
+        ctk.CTkLabel(content, text="Acceso administrativo",
+                     font=("Helvetica", fs(19), "bold"), text_color=C_TXT).pack(pady=(px(20), px(6)))
+        ctk.CTkLabel(content,
                      text="Ingresa tus credenciales y\nacerca tu rostro para confirmar.",
-                     font=("Helvetica", fs(13)), text_color=C_TXT2,
-                     justify="center").pack(pady=(0, px(24)))
+                     font=("Helvetica", fs(14)), text_color=C_TXT2,
+                     justify="center").pack(pady=(0, px(20)))
 
-        self.entry_mat_l = ctk.CTkEntry(self.ov_login_form, width=px(340), height=px(52),
-                                         placeholder_text="Matrícula", font=("Helvetica", fs(17)))
-        self.entry_mat_l.pack(pady=px(8))
+        self.entry_mat_l = ctk.CTkEntry(content, width=px(400), height=px(56),
+                                         placeholder_text="Matrícula", font=("Helvetica", fs(16)))
+        self.entry_mat_l.pack(pady=(0, px(12)))
         self.entry_mat_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_mat_l))
 
-        _fp = ctk.CTkFrame(self.ov_login_form, fg_color="transparent")
-        _fp.pack(pady=px(8))
-        self.entry_pass_l = ctk.CTkEntry(_fp, width=px(292), height=px(52),
+        _fp = ctk.CTkFrame(content, fg_color="transparent")
+        _fp.pack(pady=(0, px(14)))
+        self.entry_pass_l = ctk.CTkEntry(_fp, width=px(350), height=px(56),
                                           placeholder_text="Contraseña", show="*",
-                                          font=("Helvetica", fs(17)))
+                                          font=("Helvetica", fs(16)))
         self.entry_pass_l.pack(side="left")
         self.entry_pass_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_pass_l))
         self._pass_vis_l = False
         def _toggle_pass_l():
             self._pass_vis_l = not self._pass_vis_l
             self.entry_pass_l.configure(show="" if self._pass_vis_l else "*")
-        ctk.CTkButton(_fp, text="👁", width=px(44), height=px(52),
+        ctk.CTkButton(_fp, text="👁", width=px(48), height=px(56),
                        fg_color=C_FRAME, hover_color=C_BORDE,
-                       text_color=C_TXT2, font=("Helvetica", fs(17)),
+                       text_color=C_TXT2, font=("Helvetica", fs(16)),
                        command=_toggle_pass_l).pack(side="left", padx=(px(4), 0))
 
-        self.lbl_login_msg = ctk.CTkLabel(self.ov_login_form, text="",
+        self.lbl_login_msg = ctk.CTkLabel(content, text="",
                                            font=("Helvetica", fs(13)), text_color=C_WARN)
-        self.lbl_login_msg.pack(pady=px(6))
+        self.lbl_login_msg.pack(pady=(0, px(10)))
 
         self.btn_login_confirmar = ctk.CTkButton(
-            self.ov_login_form, text="Confirmar con rostro", width=px(300), height=px(52),
+            content, text="Confirmar con rostro", width=px(360), height=px(58),
             font=("Helvetica", fs(16), "bold"), fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A", corner_radius=12, command=self._login_confirmar)
-        self.btn_login_confirmar.pack(pady=px(10))
+        self.btn_login_confirmar.pack(pady=(0, px(10)))
 
-        ctk.CTkButton(self.ov_login_form, text="Cancelar", fg_color="transparent",
+        ctk.CTkButton(content, text="Cancelar", fg_color="transparent",
                        text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", fs(13)),
                        command=lambda: self._confirmar_cancelar(
-                           "¿Cancelar el acceso administrativo?")).pack(pady=(px(4), 0))
+                           "¿Cancelar el acceso administrativo?")).pack(pady=(0, 0))
 
         self._build_ov_login_captura()
 
@@ -2072,8 +1973,10 @@ class FaceAccess(ctk.CTk):
         self._ocultar_alerta_duplicado()
         self._ocultar_msg()
 
-        if hasattr(self, "_ov_teclado") and self._ov_teclado.winfo_ismapped():
-            self._ov_teclado.place_forget()
+        try:
+            self._teclado.cerrar()
+        except Exception:
+            pass
             
   
 

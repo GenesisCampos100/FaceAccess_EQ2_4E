@@ -66,17 +66,18 @@ class AdminSetup(ctk.CTk):
         self.frm_form.pack(fill="both", expand=True)
 
         form_wrap = ctk.CTkFrame(self.frm_form, fg_color=C_BG)
-        form_wrap.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.90, relheight=0.80)
+        form_wrap.place(relx=0.5, rely=0.48, anchor="center", relwidth=0.99, relheight=0.74)
+        form_wrap.pack_propagate(False)
 
         ctk.CTkLabel(
             form_wrap,
             text="Ingresa los datos del administrador principal",
-            font=("Helvetica", 18),
+            font=("Helvetica", 20),
             text_color=C_TXT2,
-        ).pack(pady=(26, 16))
+        ).pack(pady=(22, 22))
 
         grid = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        grid.pack(fill="x", padx=24)
+        grid.pack(fill="x", padx=8)
         grid.grid_columnconfigure(0, weight=1)
         grid.grid_columnconfigure(1, weight=1)
 
@@ -88,13 +89,13 @@ class AdminSetup(ctk.CTk):
         self._entries = {}
         for i, (lbl, key) in enumerate(campos):
             f = ctk.CTkFrame(grid, fg_color="transparent")
-            f.grid(row=i//2, column=i%2, padx=12, pady=8, sticky="ew")
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 15), text_color=C_TXT2).pack(anchor="w")
+            f.grid(row=i//2, column=i%2, padx=2, pady=12, sticky="ew")
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 16), text_color=C_TXT2).pack(anchor="w")
 
             if "contrasenia" in key:
                 fp = ctk.CTkFrame(f, fg_color="transparent")
                 fp.pack(fill="x")
-                e = ctk.CTkEntry(fp, height=52, font=("Helvetica", 17), show="*")
+                e = ctk.CTkEntry(fp, height=56, font=("Helvetica", 18), show="*")
                 e.pack(side="left", fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
                 vis = [False]
@@ -103,12 +104,12 @@ class AdminSetup(ctk.CTk):
                     v[0] = not v[0]
                     en.configure(show="" if v[0] else "*")
 
-                ctk.CTkButton(fp, text="👁", width=44, height=44,
+                ctk.CTkButton(fp, text="👁", width=44, height=48,
                                fg_color=C_FRAME, hover_color=C_BORDE,
                                text_color=C_TXT2, font=("Helvetica", 17),
                                command=_toggle).pack(side="left", padx=(6, 0))
             else:
-                e = ctk.CTkEntry(f, height=52, font=("Helvetica", 17))
+                e = ctk.CTkEntry(f, height=56, font=("Helvetica", 18))
                 e.pack(fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, en=e: self._teclado.abrir(en))
 
@@ -117,23 +118,23 @@ class AdminSetup(ctk.CTk):
         self.lbl_err = ctk.CTkLabel(
             form_wrap,
             text="",
-            font=("Helvetica", 13),
+            font=("Helvetica", 14),
             text_color=C_ERROR,
         )
-        self.lbl_err.pack(pady=(16, 10))
+        self.lbl_err.pack(pady=(18, 12))
 
         ctk.CTkButton(
             form_wrap,
             text="Continuar →",
-            width=300,
-            height=62,
+            width=340,
+            height=66,
             fg_color=C_OK,
             text_color=C_BG,
             hover_color="#00A88A",
-            font=("Helvetica", 22, "bold"),
+            font=("Helvetica", 20, "bold"),
             corner_radius=14,
             command=self._validar_form,
-        ).pack(pady=(8, 0))
+        ).pack(pady=(10, 0))
 
         ctk.CTkFrame(form_wrap, fg_color="transparent").pack(fill="both", expand=True)
     def _validar_form(self):
@@ -166,27 +167,31 @@ class AdminSetup(ctk.CTk):
 
     def _build_captura(self):
         self.frm_cap = ctk.CTkFrame(self, fg_color=C_BG)
-        ctk.CTkLabel(self.frm_cap, text="Captura de rostro",
-                     font=("Helvetica", 15, "bold"), text_color=C_TXT).pack(pady=(20, 2))
-        self.lbl_cap_nombre = ctk.CTkLabel(self.frm_cap, text="",
-                                            font=("Helvetica", 12), text_color=C_OK)
-        self.lbl_cap_nombre.pack(pady=(0, 8))
-        self.lbl_cap_video = ctk.CTkLabel(self.frm_cap, text="", width=360, height=390)
+        body = ctk.CTkFrame(self.frm_cap, fg_color=C_BG)
+        body.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.88, relheight=0.86)
+        body.pack_propagate(False)
+
+        ctk.CTkLabel(body, text="Captura de rostro",
+                     font=("Helvetica", 18, "bold"), text_color=C_TXT).pack(pady=(10, 2))
+        self.lbl_cap_nombre = ctk.CTkLabel(body, text="",
+                                            font=("Helvetica", 13), text_color=C_OK)
+        self.lbl_cap_nombre.pack(pady=(0, 10))
+        self.lbl_cap_video = ctk.CTkLabel(body, text="", width=420, height=460)
         self.lbl_cap_video.pack()
-        ctk.CTkLabel(self.frm_cap, text="Mueve la cabeza en distintos ángulos",
-                     font=("Helvetica", 11), text_color=C_TXT2).pack(pady=6)
-        self.prog_cap = ctk.CTkProgressBar(self.frm_cap, width=320, height=6,
+        ctk.CTkLabel(body, text="Mueve la cabeza en distintos ángulos",
+                     font=("Helvetica", 12), text_color=C_TXT2).pack(pady=8)
+        self.prog_cap = ctk.CTkProgressBar(body, width=360, height=8,
                                             corner_radius=3, fg_color=C_BORDE, progress_color=C_OK)
         self.prog_cap.pack(); self.prog_cap.set(0)
-        self.lbl_cap_cnt = ctk.CTkLabel(self.frm_cap, text=f"0 / {FOTOS_CAPTURA} fotos",
-                                         font=("Helvetica", 12), text_color=C_TXT2)
-        self.lbl_cap_cnt.pack(pady=4)
-        self.lbl_cap_instruc = ctk.CTkLabel(self.frm_cap, text="",
-                                             font=("Helvetica", 11), text_color=C_WARN)
+        self.lbl_cap_cnt = ctk.CTkLabel(body, text=f"0 / {FOTOS_CAPTURA} fotos",
+                                         font=("Helvetica", 13), text_color=C_TXT2)
+        self.lbl_cap_cnt.pack(pady=(6, 2))
+        self.lbl_cap_instruc = ctk.CTkLabel(body, text="",
+                                             font=("Helvetica", 12), text_color=C_WARN)
         self.lbl_cap_instruc.pack()
-        self.lbl_cap_estado = ctk.CTkLabel(self.frm_cap, text="",
-                                            font=("Helvetica", 12, "bold"), text_color=C_OK)
-        self.lbl_cap_estado.pack(pady=4)
+        self.lbl_cap_estado = ctk.CTkLabel(body, text="",
+                                            font=("Helvetica", 13, "bold"), text_color=C_OK)
+        self.lbl_cap_estado.pack(pady=(6, 0))
 
     def _abrir_captura(self):
         self._cap_imagenes = []; self._cap_count = 0

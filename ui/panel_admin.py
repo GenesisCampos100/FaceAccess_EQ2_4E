@@ -85,21 +85,21 @@ class PanelAdmin(ctk.CTkFrame):
     def _build_tab_nuevo(self):
         f = ctk.CTkFrame(self._contenido, fg_color="transparent")
         inner = ctk.CTkFrame(f, fg_color="transparent")
-        inner.place(relx=0.5, rely=0.45, anchor="center")
+        inner.place(relx=0.5, rely=0.43, anchor="center")
 
-        ctk.CTkLabel(inner, text="➕", font=("Helvetica", fs(40)),
-                     fg_color="transparent").pack(pady=(0, px(10)))
+        ctk.CTkLabel(inner, text="➕", font=("Helvetica", fs(42)),
+                 fg_color="transparent").pack(pady=(0, px(8)))
         ctk.CTkLabel(inner, text="Registrar nuevo usuario",
-                     font=("Helvetica", fs(15), "bold"),
-                     text_color=C_TXT, fg_color="transparent").pack(pady=(0, px(6)))
+                 font=("Helvetica", fs(16), "bold"),
+                 text_color=C_TXT, fg_color="transparent").pack(pady=(0, px(5)))
         ctk.CTkLabel(inner,
                      text="Se abrirá el formulario de registro.\nLuego se capturará el rostro.",
-                     font=("Helvetica", fs(12)), text_color=C_TXT2,
-                     fg_color="transparent", justify="center").pack(pady=(0, px(24)))
+                 font=("Helvetica", fs(13)), text_color=C_TXT2,
+                 fg_color="transparent", justify="center").pack(pady=(0, px(20)))
         ctk.CTkButton(inner, text="Ir al formulario  →",
-                       width=px(220), height=px(46),
+                                             width=px(240), height=px(50),
                        fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", fs(13), "bold"), corner_radius=12,
+                   font=("Helvetica", fs(13), "bold"), corner_radius=12,
                        command=self._on_nuevo_usuario).pack()
         return f
 
@@ -111,19 +111,19 @@ class PanelAdmin(ctk.CTkFrame):
         # Barra superior con contador y refresh
         top = ctk.CTkFrame(f, fg_color=C_FRAME, corner_radius=0, height=px(36))
         top.pack(fill="x"); top.pack_propagate(False)
-        self.lbl_u_total = ctk.CTkLabel(top, text="", font=("Helvetica", fs(11)),
+        self.lbl_u_total = ctk.CTkLabel(top, text="", font=("Helvetica", fs(12)),
                                          text_color=C_TXT2, fg_color="transparent")
         self.lbl_u_total.pack(side="left", padx=px(12), anchor="center")
         ctk.CTkButton(top, text="↻", width=px(36), height=px(28),
                        fg_color="transparent", text_color=C_OK,
-                       hover_color=C_BORDE, font=("Helvetica", fs(14)),
+                       hover_color=C_BORDE, font=("Helvetica", fs(13)),
                        command=self._cargar_usuarios).pack(side="right", padx=px(6))
 
         # Cabecera de columnas
         cols = ctk.CTkFrame(f, fg_color=C_FOOT, corner_radius=0, height=px(28))
         cols.pack(fill="x"); cols.pack_propagate(False)
         for texto, ancho in [("Nombre", 200), ("Matrícula", 90), ("Rol", 100), ("", 70)]:
-            ctk.CTkLabel(cols, text=texto, font=("Helvetica", fs(10), "bold"),
+            ctk.CTkLabel(cols, text=texto, font=("Helvetica", fs(11), "bold"),
                           text_color=C_TXT2, fg_color="transparent",
                           width=px(ancho)).pack(side="left", padx=px(4))
 
@@ -153,28 +153,28 @@ class PanelAdmin(ctk.CTkFrame):
                                 corner_radius=6)
             row.pack(fill="x", padx=px(6), pady=px(2))
 
-            ctk.CTkLabel(row, text=nombre, font=("Helvetica", fs(11)),
+            ctk.CTkLabel(row, text=nombre, font=("Helvetica", fs(12)),
                           text_color=C_TXT if activo else C_TXT3,
                           fg_color="transparent", width=px(200),
                           anchor="w").pack(side="left", padx=px(8), pady=px(6))
 
-            ctk.CTkLabel(row, text=u["matricula"], font=("Helvetica", fs(10)),
+            ctk.CTkLabel(row, text=u["matricula"], font=("Helvetica", fs(11)),
                           text_color=C_TXT2 if activo else C_TXT3,
                           fg_color="transparent", width=px(90)).pack(side="left")
 
-            ctk.CTkLabel(row, text=u["nombre_rol"], font=("Helvetica", fs(10)),
+            ctk.CTkLabel(row, text=u["nombre_rol"], font=("Helvetica", fs(11)),
                           text_color=C_ADMIN if activo else C_TXT3,
                           fg_color="transparent", width=px(100)).pack(side="left")
 
             if activo:
                 ctk.CTkButton(row, text="X", width=px(68), height=px(26),
                                fg_color=C_ERROR, text_color="white",
-                               hover_color="#a00000", font=("Helvetica", fs(10)),
+                               hover_color="#a00000", font=("Helvetica", fs(11)),
                                corner_radius=6,
                                command=lambda uid=u["id_usuario"], n=nombre:
                                self._confirmar_baja(uid, n)).pack(side="right", padx=px(6))
             else:
-                ctk.CTkLabel(row, text="Inactivo", font=("Helvetica", fs(10)),
+                ctk.CTkLabel(row, text="Inactivo", font=("Helvetica", fs(11)),
                               text_color=C_TXT3, fg_color="transparent",
                               width=px(68)).pack(side="right", padx=px(6))
     
@@ -206,7 +206,7 @@ class PanelAdmin(ctk.CTkFrame):
                     font=("Helvetica", fs(28)),
                     fg_color="transparent").pack(pady=(px(16), px(4)))
         ctk.CTkLabel(self._ov_confirm, text=mensaje,
-                    font=("Helvetica", fs(12)), text_color=C_TXT,
+                    font=("Helvetica", fs(13)), text_color=C_TXT,
                     fg_color="transparent", wraplength=px(260),
                     justify="center").pack(pady=(0, px(16)))
 
@@ -238,18 +238,18 @@ class PanelAdmin(ctk.CTkFrame):
 
         top = ctk.CTkFrame(f, fg_color=C_FRAME, corner_radius=0, height=px(36))
         top.pack(fill="x"); top.pack_propagate(False)
-        self.lbl_a_total = ctk.CTkLabel(top, text="", font=("Helvetica", fs(11)),
+        self.lbl_a_total = ctk.CTkLabel(top, text="", font=("Helvetica", fs(12)),
                                          text_color=C_TXT2, fg_color="transparent")
         self.lbl_a_total.pack(side="left", padx=px(12), anchor="center")
         ctk.CTkButton(top, text="↻", width=px(36), height=px(28),
                        fg_color="transparent", text_color=C_OK,
-                       hover_color=C_BORDE, font=("Helvetica", fs(14)),
+                   hover_color=C_BORDE, font=("Helvetica", fs(13)),
                        command=self._cargar_accesos).pack(side="right", padx=px(6))
 
         cols = ctk.CTkFrame(f, fg_color=C_FOOT, corner_radius=0, height=px(28))
         cols.pack(fill="x"); cols.pack_propagate(False)
         for texto, ancho in [("Nombre", 190), ("Fecha", 80), ("Hora", 60), ("Tipo", 70)]:
-            ctk.CTkLabel(cols, text=texto, font=("Helvetica", fs(10), "bold"),
+            ctk.CTkLabel(cols, text=texto, font=("Helvetica", fs(11), "bold"),
                           text_color=C_TXT2, fg_color="transparent",
                           width=px(ancho)).pack(side="left", padx=px(4))
 
@@ -273,20 +273,20 @@ class PanelAdmin(ctk.CTkFrame):
             row = ctk.CTkFrame(self._scroll_accesos, fg_color=C_FRAME, corner_radius=6)
             row.pack(fill="x", padx=px(6), pady=px(2))
 
-            ctk.CTkLabel(row, text=nombre, font=("Helvetica", fs(11)),
+            ctk.CTkLabel(row, text=nombre, font=("Helvetica", fs(12)),
                           text_color=C_TXT, fg_color="transparent",
                           width=px(190), anchor="w").pack(side="left", padx=px(8), pady=px(5))
 
-            ctk.CTkLabel(row, text=a["fecha"], font=("Helvetica", fs(10)),
+            ctk.CTkLabel(row, text=a["fecha"], font=("Helvetica", fs(11)),
                           text_color=C_TXT2, fg_color="transparent",
                           width=px(80)).pack(side="left")
 
             ctk.CTkLabel(row, text=a["hora_entrada"][:5],
-                          font=("Helvetica", fs(10)),
+                          font=("Helvetica", fs(11)),
                           text_color=C_TXT2, fg_color="transparent",
                           width=px(60)).pack(side="left")
 
-            ctk.CTkLabel(row, text=metodo, font=("Helvetica", fs(10), "bold"),
+            ctk.CTkLabel(row, text=metodo, font=("Helvetica", fs(11), "bold"),
                           text_color=color_tipo, fg_color="transparent",
                           width=px(70)).pack(side="left")
 
