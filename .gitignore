@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Runtime artifacts
+/database/control_acceso.db
+/database/control_acceso.db-wal
+/database/control_acceso.db-shm
+
+# Python bytecode under the repo
+**/__pycache__/
+**/*.pyc

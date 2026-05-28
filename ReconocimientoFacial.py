@@ -21,6 +21,7 @@ import customtkinter as ctk
 from PIL import Image
 from collections import Counter
 from datetime import datetime
+from ui.panel_admin import PanelAdmin
 
 # ── Módulos propios ───────────────────────────────────────────────────────────
 from core.reconocimiento import cargar_encodings, buscar
@@ -31,7 +32,7 @@ from ui.constantes       import (
     H_HEADER, H_SALUDO, H_VIDEO, APP_GEOMETRY,
     HAAR_CASCADE, ESCALA_DETEC, MIN_VECINOS, MIN_TAMANO_RELAT,
     FRAMES_CONFIRM, PAUSA_SEG, FALLOS_NUMPAD, EVIDENCIAS_DIR, FOTOS_CAPTURA,
-    KB_APP_W, KB_COLS, KB_PAD, KB_BH, KB_FS, KB_ACT_H,
+    KB_APP_W, KB_COLS, KB_PAD, KB_BH, KB_FS, KB_ACT_H, px, fs,
 )
 from ui.constantes import s, sf, sw
 from ui.teclado import TecladoVirtual
@@ -50,6 +51,68 @@ from database.db_manager import (
     ROL_ALUMNO,
 )
 from models.entrenadoRF import cargar_modelo_lbph, entrenar, FACE_SIZE
+
+
+# ── Funciones de escalado de UI ───────────────────────────────────────────────
+def sw(ratio, parent):
+    """Escala el ancho basado en el ancho actual de la ventana.
+    
+    Args:
+        ratio: Proporción (0-1) del ancho a usar
+        parent: Referencia a la ventana (FaceAccess)
+    
+    Returns:
+        Ancho escalado en píxeles
+    """
+    try:
+        w = parent.winfo_width()
+        if w <= 1:
+            # Si la ventana aún no se ha renderizado, usa el ancho por defecto
+            w = int(APP_GEOMETRY.split('x')[0])
+        return int(w * ratio)
+    except:
+        # Fallback: usar geometría por defecto
+        return int(int(APP_GEOMETRY.split('x')[0]) * ratio)
+
+
+def s(value, parent):
+    """Escala un valor basado en la altura actual de la ventana.
+    
+    Args:
+        value: Valor base a escalar
+        parent: Referencia a la ventana (FaceAccess)
+    
+    Returns:
+        Valor escalado
+    """
+    try:
+        h = parent.winfo_height()
+        if h <= 1:
+            # Si la ventana aún no se ha renderizado, usa la altura por defecto
+            h = int(APP_GEOMETRY.split('x')[1])
+        return int(value)  # Por ahora retorna el valor como int, sin escalar vertical
+    except:
+        return int(value)
+
+
+def sf(font_size, parent):
+    """Escala el tamaño de fuente basado en la resolución de la ventana.
+    
+    Args:
+        font_size: Tamaño base de fuente
+        parent: Referencia a la ventana (FaceAccess)
+    
+    Returns:
+        Tamaño de fuente escalado
+    """
+    try:
+        w = parent.winfo_width()
+        if w <= 1:
+            w = int(APP_GEOMETRY.split('x')[0])
+        # Escala lineal: en ventana 480 devuelve el tamaño base, en otras ajusta proporcionalmente
+        return int(font_size * w / 480)
+    except:
+        return int(font_size)
 
 
 class FaceAccess(ctk.CTk):
@@ -154,14 +217,26 @@ class FaceAccess(ctk.CTk):
         self._camara.iniciar(lock=self._lock)
         threading.Thread(target=self._hilo_rec, daemon=True).start()
         self._loop_camara()
+
         from database.db_manager import get_connection, ROL_ADMIN
         with get_connection() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) as total FROM usuarios WHERE id_rol=? AND estatus=1",
-                (ROL_ADMIN,)).fetchone()
+                (ROL_ADMIN,)
+            ).fetchone()
+
         self._admin_existe = row["total"] > 0
+
+        print("ADMIN EXISTE:", self._admin_existe)  # debug
+
         if self._admin_existe:
             self._loop_logica()
+            self._loop_logica_iniciado = True
+        else:
+            print("[SETUP] Iniciando primer administrador")
+            self._setup_inicial()
+
+        
 
     # ── Setup inicial (primer admin) ──────────────────────────────────────────
 
@@ -262,9 +337,9 @@ class FaceAccess(ctk.CTk):
             try:
                 frame = self._queue_frames.get(timeout=0.5)
             except:
-                print("[HILO] Sin frames en queue")  # ← agrega esto
+                
                 continue
-            print("[HILO] Frame recibido")  # ← y esto
+            
 
             gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
@@ -332,8 +407,8 @@ class FaceAccess(ctk.CTk):
 
         h_sm, w_sm = gray_small.shape[:2]
         min_size = (
-            max(int(w_sm * MIN_TAMANO_RELAT), 20),
-            max(int(h_sm * MIN_TAMANO_RELAT), 20)
+            max(int(w_sm * MIN_TAMANO_RELAT), 10),
+            max(int(h_sm * MIN_TAMANO_RELAT), 10)
         )
 
         with self._lock_coords:
@@ -349,13 +424,13 @@ class FaceAccess(ctk.CTk):
             roi = gray_small[y_roi:y2_roi, x_roi:x2_roi]
             if roi.size > 0:
                 rostros_roi = self._detector.detectMultiScale(
-                    roi, scaleFactor=1.1, minNeighbors=MIN_VECINOS, minSize=min_size)
+                    roi, scaleFactor=1.05, minNeighbors=MIN_VECINOS, minSize=min_size)
                 if len(rostros_roi) > 0:
                     x, y, w, h = max(rostros_roi, key=lambda r: r[2] * r[3])
                     return (x + x_roi, y + y_roi, w, h)
 
         rostros = self._detector.detectMultiScale(
-            gray_small, scaleFactor=1.1, minNeighbors=MIN_VECINOS, minSize=min_size)
+            gray_small, scaleFactor=1.05, minNeighbors=MIN_VECINOS, minSize=min_size)
 
         if len(rostros) == 0:
             return None
@@ -609,14 +684,16 @@ class FaceAccess(ctk.CTk):
         lbl_logo.bind("<Button-1>", self._logo_click)
 
         fn = ctk.CTkFrame(fl, fg_color="transparent")
-        fn.pack(side="left", anchor="center")
+        # Baja el bloque de marca unos pixeles para alinearlo mejor con el logo.
+        fn.pack(side="left", anchor="center", pady=(4, 0))
         lbl_n = ctk.CTkLabel(fn, text="VisionID", font=("Helvetica", 17, "bold"),
                               text_color=C_TXT, cursor="arrow")
-        lbl_n.pack(anchor="w")
+        lbl_n.pack(anchor="w", pady=(0, 0))
         lbl_n.bind("<Button-1>", self._logo_click)
         lbl_s = ctk.CTkLabel(fn, text="Control de Acceso", font=("Helvetica", 12),
                               text_color=C_TXT2, cursor="arrow")
-        lbl_s.pack(anchor="w")
+        # Evitar pady negativo porque CustomTkinter lanza error al escalar.
+        lbl_s.pack(anchor="w", pady=(0, 0))
         lbl_s.bind("<Button-1>", self._logo_click)
 
         fr = ctk.CTkFrame(f, fg_color="transparent")
@@ -692,6 +769,9 @@ class FaceAccess(ctk.CTk):
         self._build_ov_login()
         self._build_ov_registro()
         self._build_ov_captura()
+        self._build_panel_admin()
+
+    # ── Overlay de mensaje ────────────────────────────────────────────────────
 
     # ── Overlay de mensaje ────────────────────────────────────────────────────
 
@@ -846,20 +926,22 @@ class FaceAccess(ctk.CTk):
         self.ov_numpad = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
 
         # Contenedor centrado con ancho relativo a la ventana (90% del ancho objetivo)
-        cont_w = sw(0.9, self)
+        # Contenedor mas compacto para no saturar los bordes en pantalla pequena.
+        cont_w = sw(0.88, self)
         self._np_inner = ctk.CTkFrame(self.ov_numpad, fg_color="transparent", width=cont_w)
         self._np_inner.place(relx=0.5, rely=0.16, anchor="n")
 
+        # Tipografia ampliada para uso tactil.
         ctk.CTkLabel(self._np_inner, text="Acceso manual",
-                     font=("Helvetica", sf(18, self), "bold"), text_color=C_TXT).pack(pady=(8, 2))
+                 font=("Helvetica", sf(20, self), "bold"), text_color=C_TXT).pack(pady=(8, 3))
         ctk.CTkLabel(self._np_inner, text="Ingresa tu matrícula",
-                     font=("Helvetica", sf(13, self)), text_color=C_TXT2).pack()
+                 font=("Helvetica", sf(15, self)), text_color=C_TXT2).pack()
 
         lbl_w = int(cont_w * 0.95)
         self.lbl_np = ctk.CTkLabel(self._np_inner, text="",
-                                    font=("Helvetica", sf(26, self), "bold"), text_color=C_TXT,
-                                    fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(54, self))
-        self.lbl_np.pack(pady=(6, 6))
+                font=("Helvetica", sf(30, self), "bold"), text_color=C_TXT,
+                fg_color=C_FRAME, corner_radius=10, width=lbl_w, height=s(60, self))
+        self.lbl_np.pack(pady=(8, 8))
 
         # Botones de acción debajo del input
         fa = ctk.CTkFrame(self._np_inner, fg_color="transparent")
@@ -872,15 +954,15 @@ class FaceAccess(ctk.CTk):
         self._np_botones = {}
         self._np_renderizar_teclado()
 
-        ctk.CTkButton(fa, text="Cancelar", width=int(cont_w * 0.22), height=s(self._KB_ACT_H, self),
+        ctk.CTkButton(fa, text="Cancelar", width=int(cont_w * 0.24), height=s(self._KB_ACT_H + 4, self),
                        fg_color="transparent", text_color=C_TXT2, hover_color=C_FRAME,
-                       font=("Helvetica", sf(13, self)),
+                       font=("Helvetica", sf(15, self)),
                        command=lambda: self._confirmar_cancelar(
                            "¿Cancelar acceso manual y volver al escaneo?",
                            accion_si=self._np_cancelar)).pack(side="left", padx=8)
-        ctk.CTkButton(fa, text="OK  ✓", width=int(cont_w * 0.3), height=s(self._KB_ACT_H, self),
+        ctk.CTkButton(fa, text="OK  ✓", width=int(cont_w * 0.32), height=s(self._KB_ACT_H + 4, self),
                        fg_color=C_OK, text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", sf(15, self), "bold"), corner_radius=10,
+                       font=("Helvetica", sf(16, self), "bold"), corner_radius=10,
                        command=self._np_ok).pack(side="left", padx=8)
 
     def _np_renderizar_teclado(self):
@@ -890,11 +972,13 @@ class FaceAccess(ctk.CTk):
 
         # Calcular dimensiones relativas según el ancho del contenedor central
         # Aumentamos el ancho del contenedor para que ocupe casi todo el ancho visual
-        cont_w = self._np_kb_frame.winfo_width() or sw(0.98, self)
-        PAD = s(KB_PAD, self)
+        cont_w = self._np_kb_frame.winfo_width() or sw(0.94, self)
+        PAD = max(1, s(KB_PAD, self))
+        # Separacion vertical de teclas al doble para mejor toque.
+        PAD_Y = PAD * 2
         cols = KB_COLS
         # permitir teclas grandes y con buen espaciado
-        BW = max(44, (cont_w - PAD * (cols + 1)) // cols)
+        BW = max(42, (cont_w - PAD * (cols + 1)) // cols)
         BH = s(KB_BH + 6, self)
         FS = sf(KB_FS + 2, self)
         self._np_kb_frame.grid_columnconfigure(0, weight=1, uniform="kb")
@@ -943,14 +1027,15 @@ class FaceAccess(ctk.CTk):
                                         hover_color=C_BORDE, border_width=1,
                                         border_color=C_BORDE, corner_radius=8,
                                         command=lambda t=texto: self._np_press(t))
-                btn.grid(row=r_idx, column=c_idx, padx=PAD, pady=PAD)
+                # Horizontal compacto, vertical amplio.
+                btn.grid(row=r_idx, column=c_idx, padx=PAD, pady=PAD_Y)
                 self._np_botones[tecla] = btn
 
             # Fila inferior: Espacio (gran botón) y Listo (confirmación) a la derecha
             # Espacio ocupa la mayor parte (columnspan=8) y Listo columna 8-9
         fb = ctk.CTkFrame(self._np_kb_frame, fg_color="transparent")
         fb.grid(row=len(filas), column=0, columnspan=10,
-                padx=PAD, pady=(4, 8), sticky="ew")
+            padx=PAD, pady=(3, 7), sticky="ew")
         fb.grid_columnconfigure(0, weight=1)
         fb.grid_columnconfigure(1, weight=0)
         fb.grid_columnconfigure(2, weight=0)
@@ -958,7 +1043,7 @@ class FaceAccess(ctk.CTk):
 
         space_btn = ctk.CTkButton(
             fb, text="Espacio",
-            width=max(220, int(cont_w * 0.62)), height=s(66, self),
+            width=max(210, int(cont_w * 0.60)), height=s(66, self),
             font=("Helvetica", FS),
             fg_color=C_FRAME, text_color=C_TXT,
             hover_color=C_BORDE, border_width=1,
@@ -970,7 +1055,7 @@ class FaceAccess(ctk.CTk):
 
         listo_btn = ctk.CTkButton(
             fb, text="Listo ✓",
-            width=max(150, int(cont_w * 0.28)), height=s(66, self),
+            width=max(145, int(cont_w * 0.27)), height=s(66, self),
             font=("Helvetica", FS, "bold"),
             fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A", corner_radius=8,
@@ -1034,75 +1119,149 @@ class FaceAccess(ctk.CTk):
     # ── Login administrativo ──────────────────────────────────────────────────
     def _build_ov_login(self):
         self.ov_login = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
-
         self.ov_login_form = ctk.CTkFrame(self.ov_login, fg_color="transparent")
         self.ov_login_form.pack(fill="both", expand=True)
 
         ctk.CTkLabel(self.ov_login_form, text="Acceso administrativo",
-                     font=("Helvetica", 20, "bold"), text_color=C_TXT).pack(pady=(52, 10))
+                     font=("Helvetica", fs(18), "bold"), text_color=C_TXT).pack(pady=(px(38), px(6)))
         ctk.CTkLabel(self.ov_login_form,
                      text="Ingresa tus credenciales y\nacerca tu rostro para confirmar.",
-                     font=("Helvetica", 14), text_color=C_TXT2,
-                     justify="center").pack(pady=(0, 24))
+                     font=("Helvetica", fs(13)), text_color=C_TXT2,
+                     justify="center").pack(pady=(0, px(24)))
 
-        self.entry_mat_l = ctk.CTkEntry(self.ov_login_form, width=380, height=52,
-                                         placeholder_text="Matrícula", font=("Helvetica", 16))
-        self.entry_mat_l.pack(pady=10)
+        self.entry_mat_l = ctk.CTkEntry(self.ov_login_form, width=px(340), height=px(52),
+                                         placeholder_text="Matrícula", font=("Helvetica", fs(17)))
+        self.entry_mat_l.pack(pady=px(8))
         self.entry_mat_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_mat_l))
 
         _fp = ctk.CTkFrame(self.ov_login_form, fg_color="transparent")
-        _fp.pack(pady=10)
-        self.entry_pass_l = ctk.CTkEntry(_fp, width=320, height=52,
+        _fp.pack(pady=px(8))
+        self.entry_pass_l = ctk.CTkEntry(_fp, width=px(292), height=px(52),
                                           placeholder_text="Contraseña", show="*",
-                                          font=("Helvetica", 16))
+                                          font=("Helvetica", fs(17)))
         self.entry_pass_l.pack(side="left")
         self.entry_pass_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_pass_l))
         self._pass_vis_l = False
         def _toggle_pass_l():
             self._pass_vis_l = not self._pass_vis_l
             self.entry_pass_l.configure(show="" if self._pass_vis_l else "*")
-        ctk.CTkButton(_fp, text="👁", width=52, height=52,
+        ctk.CTkButton(_fp, text="👁", width=px(44), height=px(52),
                        fg_color=C_FRAME, hover_color=C_BORDE,
-                       text_color=C_TXT2, font=("Helvetica", 18),
-                       command=_toggle_pass_l).pack(side="left", padx=(4, 0))
+                       text_color=C_TXT2, font=("Helvetica", fs(17)),
+                       command=_toggle_pass_l).pack(side="left", padx=(px(4), 0))
 
         self.lbl_login_msg = ctk.CTkLabel(self.ov_login_form, text="",
-                                           font=("Helvetica", 14), text_color=C_WARN)
-        self.lbl_login_msg.pack(pady=8)
+                                           font=("Helvetica", fs(13)), text_color=C_WARN)
+        self.lbl_login_msg.pack(pady=px(6))
 
         self.btn_login_confirmar = ctk.CTkButton(
-            self.ov_login_form, text="Confirmar con rostro", width=320, height=54,
-            font=("Helvetica", 16, "bold"), fg_color=C_OK, text_color=C_BG,
+            self.ov_login_form, text="Confirmar con rostro", width=px(300), height=px(52),
+            font=("Helvetica", fs(16), "bold"), fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A", corner_radius=12, command=self._login_confirmar)
-        self.btn_login_confirmar.pack(pady=14)
+        self.btn_login_confirmar.pack(pady=px(10))
 
         ctk.CTkButton(self.ov_login_form, text="Cancelar", fg_color="transparent",
-                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 13),
+                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", fs(13)),
                        command=lambda: self._confirmar_cancelar(
-                           "¿Cancelar el acceso administrativo?")).pack(pady=(4, 0))
+                           "¿Cancelar el acceso administrativo?")).pack(pady=(px(4), 0))
 
-        self.ov_login_validando = ctk.CTkFrame(self.ov_login, fg_color="transparent")
-        ctk.CTkLabel(self.ov_login_validando, text="Validación de identidad",
-                     font=("Helvetica", 20, "bold"), text_color=C_TXT).pack(pady=(24, 8))
-        ctk.CTkLabel(self.ov_login_validando, text="Acerca tu rostro a la cámara",
-                     font=("Helvetica", 15), text_color=C_TXT2).pack(pady=(0, 20))
-        self.lbl_login_video = ctk.CTkLabel(self.ov_login_validando, text="",
-                                             fg_color="#0A1520", corner_radius=8)
-        self.lbl_login_video.pack(padx=12, pady=10)
-        self.lbl_login_status = ctk.CTkLabel(self.ov_login_validando, text="",
-                                              font=("Helvetica", 14, "bold"), text_color=C_OK)
-        self.lbl_login_status.pack(pady=10)
-        ctk.CTkButton(self.ov_login_validando, text="Cancelar", fg_color="transparent",
-                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 13),
-                       command=lambda: self._confirmar_cancelar(
-                           "¿Cancelar la validación de identidad?")).pack(pady=(10, 0))
+        self._build_ov_login_captura()
 
+    def _build_ov_login_captura(self):
+        """
+        Interfaz optimizada de validación para login.
+        Reutiliza el diseño de captura (banner, panel, video optimizado)
+        pero sin marco y con reconocimiento directo.
+        """
+        # Overlay principal
+        self.ov_login_captura = ctk.CTkFrame(
+            self.frame_video,
+            fg_color="#000000",
+            corner_radius=0
+        )
+
+        # VIDEO FULLSCREEN
+        self.lbl_login_cap_video = ctk.CTkLabel(
+            self.ov_login_captura,
+            text="",
+            fg_color="black"
+        )
+        self.lbl_login_cap_video.place(
+            relx=0, rely=0, relwidth=1, relheight=1
+        )
+
+        # BANNER CON HEADER
+        banner = ctk.CTkFrame(
+            self.ov_login_captura,
+            fg_color="#0A1520",
+            corner_radius=0,
+            height=px(70)
+        )
+        banner.place(
+            relx=0,
+            rely=0,
+            relwidth=1
+        )
+        banner.pack_propagate(False)
+
+        ctk.CTkLabel(
+            banner,
+            text="Validación de identidad",
+            font=("Helvetica", 20, "bold"),
+            text_color="white"
+        ).pack(pady=(px(10), px(2)), expand=False)
+
+        self.lbl_login_cap_user = ctk.CTkLabel(
+            banner,
+            text="",
+            font=("Helvetica", 14),
+            text_color="#00D4AA"
+        )
+        self.lbl_login_cap_user.pack(pady=(0, px(6)), expand=False)
+
+        # PANEL INFERIOR FLOTANTE
+        panel = ctk.CTkFrame(
+            self.ov_login_captura,
+            fg_color="#0A1520",
+            width=520,
+            height=px(110)
+        )
+
+        panel.place(
+            relx=0.5,
+            rely=1,
+            anchor="s",
+            relwidth=1
+        )
+        
+        panel.pack_propagate(False)
+        panel.grid_propagate(False)
+
+        # Instrucción
+        self.lbl_login_cap_instruc = ctk.CTkLabel(
+            panel,
+            text="Acerca tu rostro a la cámara",
+            font=("Helvetica", 22, "bold"),
+            text_color="white"
+        )
+        self.lbl_login_cap_instruc.pack(side="top", pady=(px(12), px(4)), expand=False)
+
+        # Estado
+        self.lbl_login_cap_estado = ctk.CTkLabel(
+            panel,
+            text="● Escaneando...",
+            font=("Helvetica", 14),
+            text_color=C_OK
+        )
+        self.lbl_login_cap_estado.pack(side="top", expand=False, pady=(px(4), px(12)))
+
+       
     def _abrir_login(self):
         self._modo = "login"
         self._en_pausa = True
         self._login_validando = False
         self._login_frames_confirmados = 0
-        self._login_frames_fallidos    = 0
+        self._login_frames_fallidos = 0
         while not self._queue_frames.empty():
             try: self._queue_frames.get_nowait()
             except: break
@@ -1111,11 +1270,16 @@ class FaceAccess(ctk.CTk):
         self.lbl_login_msg.configure(text="")
         self.btn_login_confirmar.configure(state="normal")
         self._ocultar_overlays()
-        self.ov_login_validando.pack_forget()
+        self.ov_login_captura.place_forget()
         self.ov_login_form.pack(fill="both", expand=True)
         self.ov_login.place(relx=0, rely=0, relwidth=1, relheight=1)
 
     def _login_confirmar(self):
+        """
+        Valida credenciales y luego confirma identidad con LBPH.
+        """
+        self._login_intentos = 0
+        self._login_max_intentos = 3
         self.btn_login_confirmar.configure(state="disabled")
         mat  = self.entry_mat_l.get().strip()
         cont = self.entry_pass_l.get().strip()
@@ -1133,94 +1297,196 @@ class FaceAccess(ctk.CTk):
             self.lbl_login_msg.configure(text="Tu rol no tiene permisos.",
                                           text_color=C_ERROR)
             self.btn_login_confirmar.configure(state="normal"); return
+        
+        # Cambiar a modo validación con video optimizado
         self._login_usuario = dict(u)
         self.ov_login_form.pack_forget()
-        self.ov_login_validando.pack(fill="both", expand=True)
-        self.lbl_login_status.configure(text="● Detectando rostro...", text_color=C_OK)
+        
+        # Mostrar la interfaz de captura para login
+        self.ov_login_captura.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.lbl_login_cap_user.configure(text=u["nombre"])
+        
+        # Iniciar validación con loop de video
         self._login_validando = True
-        self.after(300, lambda: self._validar_rostro_login_con_video(mat))
+        self._login_frames_confirmados = 0
+        self._login_frames_fallidos = 0
+        self.lbl_login_cap_estado.configure(text="● Detectando rostro...", text_color=C_OK)
+        self.after(300, lambda: self._loop_login_captura(mat))
 
-    def _validar_rostro_login_con_video(self, matricula):
-        if not self._login_validando or self._modo != "login":
+    def _loop_login_captura(self, matricula):
+        if self._modo != "login" or not self._login_validando:
             return
+        
+        try:
+            if not self.lbl_login_cap_video.winfo_exists():
+                return
+        except:
+            return
+
 
         frame = self._camara.leer()
         if frame is None:
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula)); return
+            self.after(33, lambda: self._loop_login_captura(matricula)); return
 
         try:
+            #BANNER_HEIGHT = px(70)
+            #PANEL_HEIGHT  = px(110)
+            # DESPUÉS:
+            BANNER_HEIGHT = 90   # valor fijo igual al del banner real
+            PANEL_HEIGHT  = 110  # valor fijo igual al del panel real
+            canvas_w      = self.ov_login_captura.winfo_width()
+            canvas_h      = self.ov_login_captura.winfo_height()
+            if canvas_w < 100 or canvas_h < 250:
+                self.after(33, lambda: self._loop_login_captura(matricula)); return
+
             h_orig, w_orig = frame.shape[:2]
-            target_w = 280
-            target_h = int(280 * h_orig / w_orig)
-            if target_h > 300:
-                target_h = 300
-                target_w = int(300 * w_orig / h_orig)
-            fd = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            canvas = np.zeros((300, 280, 3), dtype=np.uint8)
-            canvas.fill(10)
-            y_off = (300 - target_h) // 2
-            x_off = (280 - target_w) // 2
-            canvas[y_off:y_off+target_h, x_off:x_off+target_w] = fd
-            img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+            scale    = max(canvas_w / w_orig, canvas_h / h_orig)
+            target_w = int(w_orig * scale)
+            target_h = int(h_orig * scale)
+            fd       = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            x_crop   = max((target_w - canvas_w) // 2, 0)
+            y_crop   = max((target_h - canvas_h) // 2, 0)
+            fd       = fd[y_crop:y_crop+canvas_h, x_crop:x_crop+canvas_w]
+            fd       = cv2.resize(fd, (canvas_w, canvas_h))
+
+            # ── Rectángulo guía ───────────────────────────────────────────────
+            gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
+            coords = self._detectar(small)
+
+            instruccion = "Coloca tu rostro en el recuadro"
+            rect_color  = (100, 100, 100)  # gris = sin rostro
+
+            if coords is not None:
+                x, y, w, h = coords
+                h_sm, w_sm = small.shape[:2]
+                ratio = h / h_sm
+                cx    = (x + w/2) / w_sm
+                cy    = (y + h/2) / h_sm
+
+                if ratio < 0.15:
+                    instruccion = "Acércate más"
+                    rect_color  = (245, 166, 35)
+                elif ratio > 0.70:
+                    instruccion = "Aléjate un poco"
+                    rect_color  = (245, 166, 35)
+                elif abs(cx - 0.5) > 0.15:
+                    instruccion = "Centra tu rostro horizontalmente"
+                    rect_color  = (245, 166, 35)
+                elif abs(cy - 0.45) > 0.15:
+                    instruccion = "Ajusta la altura de tu rostro"
+                    rect_color  = (245, 166, 35)
+                else:
+                    instruccion = None  # se reemplaza por estado de validación
+                    rect_color  = (0, 212, 170)  # verde = bien posicionado
+
+            # Dibujar rectángulo centrado en la zona visible entre banner y panel
+            # Zona disponible entre banner y panel
+            remaining_h = canvas_h - BANNER_HEIGHT - PANEL_HEIGHT
+
+            # Rectángulo cabe dentro de remaining_h con margen
+            lado = int(min(canvas_w * 0.75, remaining_h * 0.80))
+
+            # Centrado horizontalmente y verticalmente en la zona media
+            rx = (canvas_w - lado) // 2
+            ry = BANNER_HEIGHT + (remaining_h - lado) // 2
+
+            grosor = 3
+            largo  = max(int(lado * 0.18), 12)
+            # Esquinas estilo doc 10
+            cv2.line(fd, (rx, ry),          (rx+largo, ry),          rect_color, grosor)
+            cv2.line(fd, (rx, ry),          (rx, ry+largo),          rect_color, grosor)
+            cv2.line(fd, (rx+lado, ry),     (rx+lado-largo, ry),     rect_color, grosor)
+            cv2.line(fd, (rx+lado, ry),     (rx+lado, ry+largo),     rect_color, grosor)
+            cv2.line(fd, (rx, ry+lado),     (rx+largo, ry+lado),     rect_color, grosor)
+            cv2.line(fd, (rx, ry+lado),     (rx, ry+lado-largo),     rect_color, grosor)
+            cv2.line(fd, (rx+lado, ry+lado),(rx+lado-largo, ry+lado),rect_color, grosor)
+            cv2.line(fd, (rx+lado, ry+lado),(rx+lado, ry+lado-largo),rect_color, grosor)
+
+            img_rgb = cv2.cvtColor(fd, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(img_rgb)
-            ci  = ctk.CTkImage(light_image=img, dark_image=img, size=(280, 300))
-            self.lbl_login_video.configure(image=ci, text="")
-            self._ci_login = ci
+            ci  = ctk.CTkImage(light_image=img, dark_image=img, size=(canvas_w, canvas_h))
+            self.lbl_login_cap_video.configure(image=ci, text="")
+            self._ci_login_cap = ci
+
         except Exception as e:
-            print(f"[VIDEO LOGIN] {e}")
+            print(f"[ERROR LOGIN CAPTURA] {e}")
+            self.after(33, lambda: self._loop_login_captura(matricula)); return
 
-        gray   = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small  = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
-        coords = self._detectar(small)
-
+        # ── Reconocimiento ────────────────────────────────────────────────────
         if coords is None:
             self._login_frames_confirmados = 0
-            self.lbl_login_status.configure(text="⚠ No se detectó rostro",
-                                             text_color=C_WARN)
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula)); return
+            self.lbl_login_cap_estado.configure(
+                text="Coloca tu rostro en el recuadro", text_color=C_WARN)
+            self.after(33, lambda: self._loop_login_captura(matricula)); return
 
-        x, y, w, h = coords
-        rostro_gray = small[y:y+h, x:x+w]
-        if rostro_gray.size > 0:
-        
-            id_u, confianza = buscar(rostro_gray, self._recognizer)
-        else:
-            id_u, confianza = None, 999
-
-        frames_fallo = 5
-        if id_u != self._login_usuario["id_usuario"]:
+        if instruccion is not None:
             self._login_frames_confirmados = 0
-            self._login_frames_fallidos   += 1
-            self.lbl_login_status.configure(
-                text=f"⚠ Validando... fallo [{self._login_frames_fallidos}/{frames_fallo}]",
-                text_color=C_WARN)
-            if self._login_frames_fallidos >= frames_fallo:
-                self.lbl_login_status.configure(text="✗ Rostro no coincide",
-                                                 text_color=C_ERROR)
-                registrar_intento_fallido("Rostro no coincide en login",
-                                           matricula=matricula,
-                                           id_usuario=self._login_usuario["id_usuario"])
-                self._login_validando = False
-                self.after(2000, self._resetear_login_form); return
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula)); return
+            self.lbl_login_cap_estado.configure(text=instruccion, text_color=C_WARN)
+            self.after(33, lambda: self._loop_login_captura(matricula)); return
 
-        self._login_frames_confirmados += 1
-        frames_necesarios = 5
-        self.lbl_login_status.configure(
-            text=f"✓ Validando... [{self._login_frames_confirmados}/{frames_necesarios}]",
-            text_color=C_OK)
-        if self._login_frames_confirmados < frames_necesarios:
-            self.after(50, lambda: self._validar_rostro_login_con_video(matricula)); return
+        # Rostro bien posicionado — reconocer
+        margen = 10
+        x1 = max(x+margen, 0); y1 = max(y+margen, 0)
+        x2 = min(x+w-margen, small.shape[1])
+        y2 = min(y+h-margen, small.shape[0])
+        rostro_crop = small[y1:y2, x1:x2]
 
-        self.lbl_login_status.configure(text="✓ Identidad confirmada", text_color=C_OK)
+        if rostro_crop.size == 0:
+            self.after(33, lambda: self._loop_login_captura(matricula)); return
+
+        rostro_proc = cv2.resize(rostro_crop, FACE_SIZE)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        rostro_proc = clahe.apply(rostro_proc)
+        rostro_proc = cv2.bilateralFilter(rostro_proc, 5, 75, 75)
+        rostro_proc = cv2.normalize(rostro_proc, None, 0, 255, cv2.NORM_MINMAX)
+
+        id_u, confianza = buscar(rostro_proc, self._recognizer)
+        print(f"[LOGIN] id_u={id_u}, esperado={self._login_usuario['id_usuario']}, confianza={confianza:.1f}")
+
+       
+        if id_u == self._login_usuario["id_usuario"]:
+            self._login_frames_confirmados += 1
+            self._login_frames_fallidos = 0  # reset fallos si hay acierto
+        else:
+            self._login_frames_fallidos += 1
+            self._login_frames_confirmados = max(0, self._login_frames_confirmados - 1)
+
+        frames_necesarios = 7  # de 10 frames, 7 deben ser correctos
+        self.lbl_login_cap_estado.configure(
+            text=f"✓ Validando... {self._login_frames_confirmados}/{frames_necesarios}",
+            text_color=C_OK if id_u == self._login_usuario["id_usuario"] else C_WARN)
+
+        if self._login_frames_fallidos >= 10:
+            self.lbl_login_cap_estado.configure(text="✗ Identidad no confirmada", text_color=C_ERROR)
+            registrar_intento_fallido("Rostro no coincide en login",
+                                    matricula=matricula,
+                                    id_usuario=self._login_usuario["id_usuario"])
+            self._login_validando = False
+            self.after(2000, self._resetear_login_form); return
+
+        if self._login_frames_confirmados >= frames_necesarios:
+            self.lbl_login_cap_estado.configure(text="✓ Identidad confirmada", text_color=C_OK)
+            self._login_validando = False
+            self.after(800, lambda: self._abrir_panel_admin(self._login_usuario)); return
+
+        self.after(80, lambda: self._loop_login_captura(matricula))
+
+        self.lbl_login_cap_estado.configure(text="✓ Identidad confirmada", text_color=C_OK)
         print(f"[LOGIN] Acceso concedido: {self._login_usuario['nombre']} (conf: {confianza:.1f})")
         self._login_validando = False
-        self.after(800, lambda: self._abrir_registro(self._login_usuario))
+        self.after(800, lambda: self._abrir_panel_admin(self._login_usuario))
 
     def _resetear_login_form(self):
+        """Regresa a la pantalla de login con formulario."""
+        self._login_validando = False
         self._login_frames_confirmados = 0
-        self._login_frames_fallidos    = 0
-        self.ov_login_validando.pack_forget()
+        self._login_frames_fallidos = 0
+        # Limpiar caché de imagen del video anterior
+        if hasattr(self, '_ci_login_cap'):
+            del self._ci_login_cap
+       
+        self.ov_login_captura.place_forget()
         self.ov_login_form.pack(fill="both", expand=True)
         self.entry_mat_l.delete(0, "end")
         self.entry_pass_l.delete(0, "end")
@@ -1228,36 +1494,62 @@ class FaceAccess(ctk.CTk):
         self.btn_login_confirmar.configure(state="normal")
 
     def _cancelar_modo(self):
+        if getattr(self, "_reg_cancelar_destino", None) == "panel" \
+                and self._login_usuario:
+            self._reg_cancelar_destino = None
+            self._ocultar_overlays()
+            self._modo = "panel_admin"
+            self._panel_admin.abrir(self._login_usuario)
+            return
+        self._reg_cancelar_destino = None
+
         modo_anterior = self._modo
+        
+
+        if modo_anterior == "captura":
+            self._cap_imagenes            = []
+            self._cap_count               = 0
+            self._coincidencias           = []
+            self._etapa_actual            = 0
+            self._foto_actual             = 0
+            self._rostro_detectado_frames = 0
+            self._posicion_valida         = False
+            try:
+                with self._queue_frames.mutex:
+                    self._queue_frames.queue.clear()
+            except: pass
+
         self._ocultar_overlays()
-        self._modo    = "acceso"
-        self._en_pausa = False
-        self._np_vis  = False
-        self._buffer  = []
-        self._frames_desc   = 0
-        self._coincidencias = []
+        self._modo             = "acceso"
+        self._en_pausa         = False
+        self._np_vis           = False
+        self._buffer           = []
+        self._frames_desc      = 0
+        self._coincidencias    = []
         self._login_validando          = False
         self._login_frames_confirmados = 0
+        self._login_usuario            = None
         self._set_estado("escaneando")
         self._ocultar_msg()
         if modo_anterior == "login":
             self._resetear_login_form()
-        elif modo_anterior == "captura":
-            self._loop_camara()
-        self._loop_logica()
 
     # ── Registro de usuarios nuevos ───────────────────────────────────────────
     def _build_ov_registro(self):
         self.ov_registro = ctk.CTkFrame(self.frame_video, fg_color="#0F1923", corner_radius=0)
+        # Formulario de registro escalado para mantener consistencia visual.
         ctk.CTkLabel(self.ov_registro, text="Registrar nuevo usuario",
-                     font=("Helvetica", 20, "bold"), text_color=C_TXT).pack(pady=(22, 4))
+                     font=("Helvetica", 19, "bold"), text_color=C_TXT).pack(pady=(18, 4))
         self.lbl_reg_op = ctk.CTkLabel(self.ov_registro, text="",
-                                        font=("Helvetica", 13), text_color=C_OK)
+                                        font=("Helvetica", 14), text_color=C_OK)
         self.lbl_reg_op.pack(pady=(0, 14))
 
         self._entries = {}
+        # Grid con columnas elásticas para aprovechar ancho disponible.
         form_grid = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
-        form_grid.pack(pady=8)
+        form_grid.pack(fill="x", padx=24, pady=8)
+        form_grid.grid_columnconfigure(0, weight=1)
+        form_grid.grid_columnconfigure(1, weight=1)
 
         campos = [
             ("Nombre(s)", "nombre"),            ("Apellido paterno", "apellido_p"),
@@ -1276,53 +1568,58 @@ class FaceAccess(ctk.CTk):
                 self._grado_frame = f; f.grid_remove()
             elif key == "grupo":
                 self._grupo_frame = f; f.grid_remove()
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 13),
+            # Labels de campo agrandados para lectura rápida.
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", 15),
                           text_color=C_TXT2).pack(anchor="w")
 
             if key in ("contrasenia", "contrasenia2"):
                 fp = ctk.CTkFrame(f, fg_color="transparent")
-                fp.pack(anchor="w")
-                e = ctk.CTkEntry(fp, width=160, height=44, font=("Helvetica", 15), show="*")
-                e.pack(side="left")
+                fp.pack(fill="x", anchor="w")
+                # Campos de contraseña con tamaño táctil.
+                e = ctk.CTkEntry(fp, height=52, font=("Helvetica", 17), show="*", border_width=2, border_color=C_OK)
+                e.pack(side="left", fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
                 vis = [False]
                 def _toggle(en=e, v=vis):
                     v[0] = not v[0]
                     en.configure(show="" if v[0] else "*")
-                ctk.CTkButton(fp, text="👁", width=38, height=44,
+                ctk.CTkButton(fp, text="👁", width=44, height=52,
                                fg_color=C_FRAME, hover_color=C_BORDE,
-                               text_color=C_TXT2, font=("Helvetica", 16),
-                               command=_toggle).pack(side="left", padx=(2, 0))
+                               text_color=C_TXT2, font=("Helvetica", 17),
+                               command=_toggle).pack(side="left", padx=(6, 0))
             else:
-                e = ctk.CTkEntry(f, width=200, height=44, font=("Helvetica", 15))
-                e.pack()
+                # Campos generales de texto con misma escala de login/setup.
+                e = ctk.CTkEntry(f, height=52, font=("Helvetica", 17),border_width=2, border_color=C_OK)
+                e.pack(fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
 
             self._entries[key] = e
 
         rol_frame = ctk.CTkFrame(form_grid, fg_color="transparent")
-        rol_frame.grid(row=4, column=0, padx=18, pady=6, sticky="w")
-        ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", 13),
+        rol_frame.grid(row=4, column=0, padx=12, pady=6, sticky="w")
+        ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", 15),
                       text_color=C_TXT2).pack(anchor="w")
-        self.combo_rol = ctk.CTkComboBox(rol_frame, width=140, height=32,
-                                          font=("Helvetica", 15),
+        # Combo de rol aumentado para mantener consistencia táctil.
+        self.combo_rol = ctk.CTkComboBox(rol_frame, width=180, height=52,
+                                          font=("Helvetica", 17),
                                           values=["ALUMNO", "PERSONAL_ESCOLAR"],
                                           command=self._actualizar_campos_rol)
         self.combo_rol.pack()
         self.combo_rol.set("ALUMNO")
 
         self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="",
-                                         font=("Helvetica", 12), text_color=C_ERROR)
-        self.lbl_reg_err.pack(pady=6)
+                                         font=("Helvetica", 13), text_color=C_ERROR)
+        self.lbl_reg_err.pack(pady=4)
 
-        fb = ctk.CTkFrame(self.ov_registro, fg_color="transparent"); fb.pack(pady=16)
-        ctk.CTkButton(fb, text="Continuar →", width=150, height=40, fg_color=C_OK,
+        fb = ctk.CTkFrame(self.ov_registro, fg_color="transparent"); fb.pack(pady=14)
+        # Botones principales de registro con área táctil amplia.
+        ctk.CTkButton(fb, text="Continuar →", width=220, height=56, fg_color=C_OK,
                        text_color=C_BG, hover_color="#00A88A",
-                       font=("Helvetica", 16, "bold"),
+                       font=("Helvetica", 17, "bold"),
                        command=self._reg_continuar).pack(side="left", padx=6)
-        ctk.CTkButton(fb, text="Cancelar", width=100, height=40,
+        ctk.CTkButton(fb, text="Cancelar", width=140, height=56,
                        fg_color="transparent", text_color=C_TXT2,
-                       hover_color=C_FRAME, font=("Helvetica", 13),
+                       hover_color=C_FRAME, font=("Helvetica", 15),
                        command=lambda: self._confirmar_cancelar(
                            "¿Cancelar el registro? Se perderán los datos ingresados.")
                        ).pack(side="left", padx=6)
@@ -1353,36 +1650,58 @@ class FaceAccess(ctk.CTk):
     # ── Captura de rostro para registro ──────────────────────────────────────
 
     def _build_ov_captura(self):
-        self.ov_captura = ctk.CTkFrame(self.frame_video, fg_color="#080F16", corner_radius=0)
-        ctk.CTkLabel(self.ov_captura, text="Captura de rostro",
-                     font=("Helvetica", 15, "bold"), text_color=C_TXT).pack(pady=(24, 2))
-        self.lbl_cap_nombre = ctk.CTkLabel(self.ov_captura, text="",
-                                            font=("Helvetica", 12), text_color=C_OK)
-        self.lbl_cap_nombre.pack(pady=(0, 10))
-        self.lbl_cap_video = ctk.CTkLabel(self.ov_captura, text="", width=320, height=240)
-        self.lbl_cap_video.pack()
-        ctk.CTkLabel(self.ov_captura, text="Mueve la cabeza en distintos ángulos",
-                      font=("Helvetica", 11), text_color=C_TXT2).pack(pady=8)
-        self.prog_cap = ctk.CTkProgressBar(self.ov_captura, width=320, height=6,
-                                            corner_radius=3, fg_color=C_BORDE,
-                                            progress_color=C_OK)
-        self.prog_cap.pack(); self.prog_cap.set(0)
-        self.lbl_cap_cnt = ctk.CTkLabel(self.ov_captura,
-                                         text=f"0 / {FOTOS_CAPTURA} fotos",
-                                         font=("Helvetica", 12), text_color=C_TXT2)
-        self.lbl_cap_cnt.pack(pady=6)
-        self.lbl_cap_instruc = ctk.CTkLabel(self.ov_captura, text="",
-                                             font=("Helvetica", 11), text_color=C_WARN)
-        self.lbl_cap_instruc.pack(pady=(0, 4))
-        self.lbl_cap_estado = ctk.CTkLabel(self.ov_captura, text="",
-                                            font=("Helvetica", 12, "bold"), text_color=C_OK)
-        self.lbl_cap_estado.pack(pady=2)
-        ctk.CTkButton(self.ov_captura, text="Cancelar", fg_color="transparent",
-                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", 12),
-                       command=lambda: self._confirmar_cancelar(
-                           "¿Cancelar la captura? Se perderán las fotos tomadas.")
-                       ).pack(pady=(10, 0))
+        self.ov_captura = ctk.CTkFrame(self.frame_video, fg_color="#000000", corner_radius=0)
 
+        self.lbl_cap_video = ctk.CTkLabel(self.ov_captura, text="", fg_color="black")
+        self.lbl_cap_video.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        # 🔥 GUARDAR COMO self.banner
+        self.banner = ctk.CTkFrame(self.ov_captura, fg_color="#0A1520", corner_radius=0, height=px(70))
+        self.banner.place(relx=0, rely=0, relwidth=1)
+        self.banner.pack_propagate(False)
+
+        ctk.CTkLabel(self.banner, text="Captura de rostro",
+                    font=("Helvetica", 20, "bold"), text_color="white").pack(pady=(px(10), px(2)))
+
+        self.lbl_cap_nombre = ctk.CTkLabel(self.banner, text="",
+                                        font=("Helvetica", 14), text_color="#00D4AA")
+        self.lbl_cap_nombre.pack(pady=(0, px(6)))
+
+        # 🔥 GUARDAR COMO self.panel
+        self.panel = ctk.CTkFrame(self.ov_captura, fg_color="#0A1520", corner_radius=0, height=px(140))
+        self.panel.place(relx=0.5, rely=1, anchor="s", relwidth=1)
+        self.panel.pack_propagate(False)
+
+        content = ctk.CTkFrame(self.panel, fg_color="transparent")
+        content.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.lbl_cap_estado = ctk.CTkLabel(content, text="Mira al frente",
+                                        font=("Helvetica", 19, "bold"), text_color="white")
+        self.lbl_cap_estado.pack(pady=(0, 4))
+
+        self.lbl_cap_instruc = ctk.CTkLabel(content, text="",
+                                            font=("Helvetica", 13), text_color="#FFB347")
+        self.lbl_cap_instruc.pack(pady=(0, 6))
+
+        self.prog_cap = ctk.CTkProgressBar(content, width=240, height=16,
+                                        corner_radius=10, fg_color="#DCE4EC",
+                                        progress_color="#00D4AA")
+        self.prog_cap.pack(pady=(0, 4))
+        self.prog_cap.set(0)
+
+        self.lbl_cap_cnt = ctk.CTkLabel(content,
+                                    text=f"(0/{FOTOS_CAPTURA} imágenes)",
+                                    font=("Helvetica", 12), text_color="#00AEEF")
+        self.lbl_cap_cnt.pack(pady=(0, 6))
+
+        ctk.CTkButton(content, text="Cancelar", fg_color="transparent",
+                    hover_color="#1E293B", border_width=1, border_color="#334155",
+                    width=120, height=34,
+                    command=lambda: self._confirmar_cancelar(
+                        "¿Cancelar la captura? Se perderán las fotos tomadas.")
+                    ).pack()
+
+    
     def _abrir_captura(self):
         self._modo          = "captura"
         self._cap_imagenes  = []
@@ -1419,41 +1738,45 @@ class FaceAccess(ctk.CTk):
 
         frame = self._camara.leer()
         if frame is None:
-            self.after(150, self._loop_captura); return
+            self.after(50, self._loop_captura); return
 
         try:
+            BANNER_HEIGHT = px(70)
+            PANEL_HEIGHT  = px(140)
+            canvas_w = self.ov_captura.winfo_width()
+            canvas_h = self.ov_captura.winfo_height()
+            if canvas_w < 100 or canvas_h < 250:
+                self.after(50, self._loop_captura); return
             h_orig, w_orig = frame.shape[:2]
-            target_w = 360
-            target_h = int(360 * h_orig / w_orig)
-            if target_h > 390:
-                target_h = 390
-                target_w = int(390 * w_orig / h_orig)
+            scale = max(canvas_w / w_orig, canvas_h / h_orig)
+            target_w = int(w_orig * scale)
+            target_h = int(h_orig * scale)
             fd = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-            canvas = np.zeros((390, 360, 3), dtype=np.uint8)
-            canvas.fill(10)
-            y_off = (390 - target_h) // 2
-            x_off = (360 - target_w) // 2
-            canvas[y_off:y_off+target_h, x_off:x_off+target_w] = fd
-            marco_w = int(target_w * 0.60)
-            marco_h = int(target_h * 0.70)
-            marco_x = x_off + (target_w - marco_w) // 2
-            marco_y = y_off + (target_h - marco_h) // 2
+            x_crop = max((target_w - canvas_w) // 2, 0)
+            y_crop = max((target_h - canvas_h) // 2, 0)
+            fd = fd[y_crop:y_crop+canvas_h, x_crop:x_crop+canvas_w]
+            fd = cv2.resize(fd, (canvas_w, canvas_h))
+
+            # Dibujar rectángulo centrado en la zona visible entre banner y panel
+            remaining_h = canvas_h - BANNER_HEIGHT - PANEL_HEIGHT
+            lado = int(min(canvas_w, remaining_h) * 0.65) #65
+            marco_x = (canvas_w - lado) // 2
+            marco_y = BANNER_HEIGHT + (remaining_h - lado) // 2
+
             color_marco = (0, 212, 170) if self._posicion_valida else (245, 166, 35)
-            cv2.rectangle(canvas, (marco_x, marco_y),
-                          (marco_x + marco_w, marco_y + marco_h), color_marco, 3)
-            img_rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(img_rgb)
-            ci  = ctk.CTkImage(light_image=img, dark_image=img, size=(360, 390))
+            cv2.rectangle(fd, (marco_x, marco_y), (marco_x+lado, marco_y+lado), color_marco, 3)
+            img_rgb = cv2.cvtColor(fd, cv2.COLOR_BGR2RGB)
+            ci = ctk.CTkImage(light_image=Image.fromarray(img_rgb),
+                               dark_image=Image.fromarray(img_rgb), size=(canvas_w, canvas_h))
             self.lbl_cap_video.configure(image=ci, text="")
             self._ci_cap = ci
         except Exception as e:
             print(f"[ERROR CAPTURA] {e}")
-            self.after(80, self._loop_captura); return
+            self.after(50, self._loop_captura); return
 
-        gray   = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        small  = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
+        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(gray, (0, 0), fx=ESCALA_DETEC, fy=ESCALA_DETEC)
         coords = self._detectar(small)
-
         rostro_bien_posicionado = False
         instruccion = ""
 
@@ -1461,7 +1784,6 @@ class FaceAccess(ctk.CTk):
             x, y, w, h = coords
             h_sm, w_sm = small.shape[:2]
             ratio_altura = h / h_sm
-
             if ratio_altura < 0.15:
                 instruccion = "Acércate más"
             elif ratio_altura > 0.70:
@@ -1469,29 +1791,21 @@ class FaceAccess(ctk.CTk):
             else:
                 centro_x = (x + w/2) / w_sm
                 centro_y = (y + h/2) / h_sm
-                if abs(centro_x - 0.5) > 0.15:
-                    instruccion = "Centra tu rostro"
-                elif abs(centro_y - 0.45) > 0.15:
-                    instruccion = "Ajusta la altura"
-                else:
-                    rostro_bien_posicionado = True
-                    instruccion = "✓ Posición correcta"
+                if abs(centro_x - 0.5) > 0.15:   instruccion = "Centra tu rostro"
+                elif abs(centro_y - 0.45) > 0.15: instruccion = "Ajusta la altura"
+                else: rostro_bien_posicionado = True; instruccion = "✓ Posición correcta"
 
             self._posicion_valida = rostro_bien_posicionado
-            if rostro_bien_posicionado:
-                self._rostro_detectado_frames += 1
-            else:
-                self._rostro_detectado_frames = 0
+            self._rostro_detectado_frames = self._rostro_detectado_frames + 1 \
+                if rostro_bien_posicionado else 0
 
             margen = 10
-            x1 = max(x + margen, 0); y1 = max(y + margen, 0)
-            x2 = min(x + w - margen, small.shape[1])
-            y2 = min(y + h - margen, small.shape[0])
-            rostro_crop = small[y1:y2, x1:x2]
+            rostro_crop = small[max(y+margen,0):min(y+h-margen,small.shape[0]),
+                                 max(x+margen,0):min(x+w-margen,small.shape[1])]
 
             if rostro_crop.size > 0:
                 rostro_res = cv2.resize(rostro_crop, FACE_SIZE)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
                 rostro_res = clahe.apply(rostro_res)
                 rostro_res = cv2.bilateralFilter(rostro_res, 5, 75, 75)
                 rostro_res = cv2.normalize(rostro_res, None, 0, 255, cv2.NORM_MINMAX)
@@ -1503,54 +1817,47 @@ class FaceAccess(ctk.CTk):
                         if id_existente is not None and confianza < 55:
                             self._coincidencias.append(id_existente)
                         if len(self._coincidencias) >= 5:
-                            id_rep = max(set(self._coincidencias),
-                                         key=self._coincidencias.count)
+                            id_rep = max(set(self._coincidencias), key=self._coincidencias.count)
                             if self._coincidencias.count(id_rep) >= 3:
                                 u_dup = obtener_usuario_por_id(id_rep)
                                 nombre_dup = (f"{u_dup['nombre']} {u_dup['apellido_p']}"
                                               if u_dup else "Usuario existente")
-                                print(f"[DUPLICADO] Rostro ya registrado: {nombre_dup}")
                                 self._mostrar_alerta_duplicado(nombre_dup)
-                                self._modo = "cerrado_captura"  # Detiene el loop
+                                self._modo = "cerrado_captura"
                                 self.after(4000, self._volver_a_formulario_registro); return
                     except Exception as e:
                         print(f"[VALIDACIÓN] {e}")
 
                 if self._rostro_detectado_frames >= 3:
                     self._cap_imagenes.append(rostro_res)
-                    self._foto_actual += 1
-                    self._cap_count   += 1
+                    self._foto_actual += 1; self._cap_count += 1
                     self._rostro_detectado_frames = 0
                     etapa = self._etapas_captura[self._etapa_actual]
                     self.prog_cap.set(self._cap_count / FOTOS_CAPTURA)
                     self.lbl_cap_cnt.configure(
                         text=f"{self._cap_count} / {FOTOS_CAPTURA} fotos  |  "
-                             f"[{self._foto_actual}/{etapa['fotos']}]",
-                        text_color=C_OK)
+                             f"[{self._foto_actual}/{etapa['fotos']}]", text_color=C_OK)
                     if self._foto_actual >= etapa["fotos"]:
-                        self._etapa_actual += 1
-                        self._foto_actual   = 0
+                        self._etapa_actual += 1; self._foto_actual = 0
                         if self._etapa_actual >= len(self._etapas_captura):
-                            self.after(150, self._finalizar_registro); return
-                        else:
-                            self.lbl_cap_instruc.configure(
-                                text="Preparando siguiente posición...",
-                                text_color=C_WARN)
-                            self.lbl_cap_estado.configure(
-                                text=self._etapas_captura[self._etapa_actual]["mensaje"],
-                                text_color=C_OK)
-                            self.after(2000, self._loop_captura); return
-                    self.after(600, self._loop_captura); return
+                            self.after(50, self._finalizar_registro); return
+                        self.lbl_cap_instruc.configure(
+                            text="Preparando siguiente posición...", text_color=C_WARN)
+                        self.lbl_cap_estado.configure(
+                            text=self._etapas_captura[self._etapa_actual]["mensaje"],
+                            text_color=C_OK)
+                        self.after(2000, self._loop_captura); return
+                    self.after(250, self._loop_captura); return
         else:
             self._rostro_detectado_frames = 0
             self._posicion_valida = False
             instruccion = "Acerca tu rostro"
 
         etapa = self._etapas_captura[self._etapa_actual]
-        estado_color = C_OK if self._posicion_valida else C_WARN
-        self.lbl_cap_estado.configure(text=etapa["mensaje"], text_color=estado_color)
-        self.lbl_cap_instruc.configure(text=instruccion, text_color=estado_color)
-        self.after(150, self._loop_captura)
+        color = C_OK if self._posicion_valida else C_WARN
+        self.lbl_cap_estado.configure(text=etapa["mensaje"], text_color=color)
+        self.lbl_cap_instruc.configure(text=instruccion, text_color=color)
+        self.after(50, self._loop_captura)
 
     def _volver_a_formulario_registro(self):
         """Regresa al formulario tras detectar duplicado, sin perder datos del operador."""
@@ -1627,7 +1934,9 @@ class FaceAccess(ctk.CTk):
             self._modo    = "acceso"
             self._en_pausa = False
             self._set_estado("escaneando")
-            self._loop_logica()
+            if not getattr(self, "_loop_logica_iniciado", False):
+                self._loop_logica()
+                self._loop_logica_iniciado = True
             return
         self.ov_captura.place_forget()
         self._reg_datos               = {}
@@ -1644,8 +1953,7 @@ class FaceAccess(ctk.CTk):
             e.delete(0, "end")
         self.combo_rol.set("ALUMNO")
         self._actualizar_campos_rol("ALUMNO")
-        self._modo = "registro"
-        self.ov_registro.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._abrir_panel_admin(self._login_usuario)
 
     def _validar_rostro_duplicado(self):
         if not self._cap_imagenes or self._recognizer is None:
@@ -1729,14 +2037,45 @@ class FaceAccess(ctk.CTk):
                 text="", text_color=C_TXT2))
 
     # ── Estado y helpers UI ───────────────────────────────────────────────────
+    def _build_panel_admin(self):
+        self._panel_admin = PanelAdmin(
+            parent=self.frame_video,
+            on_nuevo_usuario=self._panel_ir_registro,
+            on_cerrar=self._cancelar_modo,
+        )
+        self._panel_admin._on_confirmar_salir = lambda: self._confirmar_cancelar(
+        "¿Cerrar el panel administrativo\ny volver al reconocimiento?",
+            accion_si=self._cancelar_modo
+        )
+
+    def _panel_ir_registro(self):
+        """Desde panel admin → formulario de registro."""
+        self._panel_admin.cerrar()
+        self._reg_cancelar_destino = "panel"
+        self._abrir_registro(self._login_usuario)
+
+    def _abrir_panel_admin(self, operador):
+        """Se llama tras login facial exitoso — muestra el panel."""
+        self._modo = "panel_admin"
+        self._panel_admin.abrir(operador)
 
     def _ocultar_overlays(self):
         for ov in [self.ov_numpad, self.ov_login, self.ov_registro, self.ov_captura]:
             ov.place_forget()
+        if hasattr(self, "_panel_admin"):   
+            self._panel_admin.cerrar()
+
+        if hasattr(self, "ov_login_captura"):
+                self.ov_login_captura.place_forget()
+                self._login_validando = False
+
         self._ocultar_alerta_duplicado()
         self._ocultar_msg()
+
         if hasattr(self, "_ov_teclado") and self._ov_teclado.winfo_ismapped():
             self._ov_teclado.place_forget()
+            
+  
 
     def _set_estado(self, estado):
         self.estado = estado
@@ -1851,16 +2190,16 @@ class FaceAccess(ctk.CTk):
             self._ov_confirm.destroy()
 
         ctk.CTkButton(
-            fb, text="Sí, cancelar", width=120, height=38,
+            fb, text="Sí, cancelar", width=170, height=52,
             fg_color=C_ERROR, text_color="white",
-            hover_color="#a00000", font=("Helvetica", 14, "bold"),
+            hover_color="#a00000", font=("Helvetica", 15, "bold"),
             command=_si
         ).pack(side="left", padx=3)
 
         ctk.CTkButton(
-            fb, text="No, continuar", width=120, height=38,
+            fb, text="No, continuar", width=170, height=52,
             fg_color=C_OK, text_color=C_BG,
-            hover_color="#00A88A", font=("Helvetica", 14, "bold"),
+            hover_color="#00A88A", font=("Helvetica", 15, "bold"),
             command=_no
         ).pack(side="left", padx=3)
 

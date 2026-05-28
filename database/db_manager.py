@@ -346,3 +346,31 @@ def guardar_evidencia(id_acceso: int, url_foto: str, motivo: str = ""):
             "INSERT INTO evidencias (id_acceso, url_foto, motivo) VALUES (?, ?, ?)",
             (id_acceso, url_foto, motivo)
         )
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PANEL ADMIN
+# ══════════════════════════════════════════════════════════════════════════════
+
+def listar_usuarios() -> list:
+    """Retorna todos los usuarios (activos e inactivos) con su rol."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT u.id_usuario, u.nombre, u.apellido_p, u.apellido_m, "
+            "u.matricula, u.grado, u.grupo, u.estatus, r.nombre_rol "
+            "FROM usuarios u JOIN roles r ON r.id_rol = u.id_rol "
+            "ORDER BY u.estatus DESC, u.nombre ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def listar_accesos(limite: int = 50) -> list:
+    """Retorna los últimos N accesos con nombre del usuario."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT a.id_acceso, a.fecha, a.hora_entrada, a.metodo, "
+            "u.nombre, u.apellido_p, u.matricula "
+            "FROM accesos a JOIN usuarios u ON u.id_usuario = a.id_usuario "
+            "ORDER BY a.fecha DESC, a.hora_entrada DESC LIMIT ?",
+            (limite,)
+        ).fetchall()
+    return [dict(r) for r in rows]
