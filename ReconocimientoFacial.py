@@ -125,6 +125,8 @@ class FaceAccess(ctk.CTk):
         self.geometry(APP_GEOMETRY)
         self.resizable(False, False)
         self.configure(fg_color=C_BG)
+        self.attributes("-fullscreen", True)
+        self.bind("<Escape>", lambda e: self.attributes("-fullscreen", False))
 
         # ── Estado de la aplicación ───────────────────────────────────────────
         self.estado          = "escaneando"
