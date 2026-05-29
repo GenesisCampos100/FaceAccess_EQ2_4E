@@ -75,18 +75,19 @@ class AdminSetup(ctk.CTk):
         self.frm_form.pack(fill="both", expand=True)
 
         form_wrap = ctk.CTkFrame(self.frm_form, fg_color=C_BG)
-        form_wrap.place(relx=0.5, rely=0.48, anchor="center", relwidth=0.99, relheight=0.74)
+        form_wrap.place(relx=0.5, rely=0.43, anchor="center", relwidth=0.99, relheight=0.68)
         form_wrap.pack_propagate(False)
 
         ctk.CTkLabel(
             form_wrap,
-            text="Ingresa los datos del administrador principal",
+            text="Ingresa los datos del\nadministrador principal",
             font=("Helvetica", 30),
+            justify="center",
             text_color=C_TXT2,
-        ).pack(pady=(22, 22))
+        ).pack(fill="x", padx=18, pady=(24, 18))
 
         grid = ctk.CTkFrame(form_wrap, fg_color="transparent")
-        grid.pack(fill="x", padx=8)
+        grid.pack(fill="x", padx=18)
         grid.grid_columnconfigure(0, weight=1)
         grid.grid_columnconfigure(1, weight=1)
 
@@ -98,7 +99,7 @@ class AdminSetup(ctk.CTk):
         self._entries = {}
         for i, (lbl, key) in enumerate(campos):
             f = ctk.CTkFrame(grid, fg_color="transparent")
-            f.grid(row=i//2, column=i%2, padx=2, pady=12, sticky="ew")
+            f.grid(row=i // 2, column=i % 2, padx=10, pady=11, sticky="ew")
             ctk.CTkLabel(f, text=lbl, font=("Helvetica", 24), text_color=C_TXT2).pack(anchor="w")
 
             if "contrasenia" in key:
@@ -143,7 +144,7 @@ class AdminSetup(ctk.CTk):
             font=("Helvetica", 30, "bold"),
             corner_radius=14,
             command=self._validar_form,
-        ).pack(pady=(10, 0))
+        ).pack(pady=(8, 6))
 
         ctk.CTkFrame(form_wrap, fg_color="transparent").pack(fill="both", expand=True)
 

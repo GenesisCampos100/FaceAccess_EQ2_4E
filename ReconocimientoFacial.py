@@ -758,11 +758,11 @@ class FaceAccess(ctk.CTk):
         fn = ctk.CTkFrame(fl, fg_color="transparent")
         # Baja el bloque de marca unos pixeles para alinearlo mejor con el logo.
         fn.pack(side="left", anchor="center", pady=(4, 0))
-        lbl_n = ctk.CTkLabel(fn, text="VisionID", font=("Helvetica", 17, "bold"),
+        lbl_n = ctk.CTkLabel(fn, text="VisionID", font=("Helvetica", 26, "bold"),
                               text_color=C_TXT, cursor="arrow")
         lbl_n.pack(anchor="w", pady=(0, 0))
         lbl_n.bind("<Button-1>", self._logo_click)
-        lbl_s = ctk.CTkLabel(fn, text="Control de Acceso", font=("Helvetica", 12),
+        lbl_s = ctk.CTkLabel(fn, text="Control de Acceso", font=("Helvetica", 18),
                               text_color=C_TXT2, cursor="arrow")
         # Evitar pady negativo porque CustomTkinter lanza error al escalar.
         lbl_s.pack(anchor="w", pady=(0, 0))
@@ -770,10 +770,10 @@ class FaceAccess(ctk.CTk):
 
         fr = ctk.CTkFrame(f, fg_color="transparent")
         fr.pack(side="right", padx=18, fill="y")
-        self.lbl_hora = ctk.CTkLabel(fr, text="", font=("Helvetica", 26, "bold"),
+        self.lbl_hora = ctk.CTkLabel(fr, text="", font=("Helvetica", 39, "bold"),
                                       text_color=C_TXT)
         self.lbl_hora.pack(anchor="e", pady=(14, 0))
-        self.lbl_fecha = ctk.CTkLabel(fr, text="", font=("Helvetica", 12),
+        self.lbl_fecha = ctk.CTkLabel(fr, text="", font=("Helvetica", 18),
                                        text_color=C_TXT2)
         self.lbl_fecha.pack(anchor="e")
 
@@ -796,14 +796,14 @@ class FaceAccess(ctk.CTk):
     def _build_saludo(self):
         f = ctk.CTkFrame(self, fg_color=C_FOOT, corner_radius=0, height=H_SALUDO)
         f.pack(fill="x"); f.pack_propagate(False)
-        self.lbl_saludo = ctk.CTkLabel(f, text="", font=("Helvetica", 13),
+        self.lbl_saludo = ctk.CTkLabel(f, text="", font=("Helvetica", 20),
                                         text_color=C_TXT2)
         self.lbl_saludo.pack(side="left", padx=18)
         fc = ctk.CTkFrame(f, fg_color="transparent")
         fc.pack(side="right", padx=18)
-        ctk.CTkLabel(fc, text="●", font=("Helvetica", 9),
+        ctk.CTkLabel(fc, text="●", font=("Helvetica", 14),
                      text_color=C_OK).pack(side="left", padx=(0, 4))
-        self.lbl_cnt_in = ctk.CTkLabel(fc, text="0 entradas", font=("Helvetica", 13),
+        self.lbl_cnt_in = ctk.CTkLabel(fc, text="0 entradas", font=("Helvetica", 20),
                                         text_color=C_OK)
         self.lbl_cnt_in.pack(side="left")
 
@@ -814,14 +814,14 @@ class FaceAccess(ctk.CTk):
         self.frame_video.pack_propagate(False)
 
         self.lbl_video = ctk.CTkLabel(self.frame_video, text="Iniciando cámara...",
-                                       font=("Helvetica", 14), text_color=C_TXT2)
+                           font=("Helvetica", 21), text_color=C_TXT2)
         self.lbl_video.place(relx=0.5, rely=0.5, anchor="center", relwidth=1, relheight=1)
 
         self._badge_frame = ctk.CTkFrame(self.frame_video, fg_color=C_FRAME,
                                           corner_radius=10, bg_color="#080F16")
         self._badge_frame.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
         self.lbl_badge = ctk.CTkLabel(self._badge_frame, text="● Escaneando",
-                                       font=("Helvetica", 11, "bold"),
+                           font=("Helvetica", 17, "bold"),
                                        text_color=C_OK, fg_color="transparent",
                                        corner_radius=0, padx=12, pady=4)
         self.lbl_badge.pack()
@@ -829,7 +829,7 @@ class FaceAccess(ctk.CTk):
         self._inst_frame = ctk.CTkFrame(self.frame_video, fg_color="#0D1E2D",
                                          corner_radius=20, bg_color="#080F16")
         self.lbl_inst = ctk.CTkLabel(self._inst_frame, text="",
-                                      font=("Helvetica", 14, "bold"),
+                          font=("Helvetica", 21, "bold"),
                                       text_color=C_OK, fg_color="transparent",
                                       corner_radius=0, padx=20, pady=8)
         self.lbl_inst.pack()
@@ -859,7 +859,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_msg_icono = ctk.CTkLabel(
             self.ov_msg,
             text="",
-            font=("Helvetica", 24),
+            font=("Helvetica", 36),
             fg_color="transparent",
             width=42,
         )
@@ -871,7 +871,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_msg_titulo = ctk.CTkLabel(
             self._msg_texts,
             text="",
-            font=("Helvetica", 17, "bold"),
+            font=("Helvetica", 26, "bold"),
             text_color=C_TXT,
             fg_color="transparent",
         )
@@ -880,7 +880,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_msg_nombre = ctk.CTkLabel(
             self._msg_texts,
             text="",
-            font=("Helvetica", 14),
+            font=("Helvetica", 21),
             text_color=C_TXT2,
             fg_color="transparent",
         )
@@ -889,7 +889,7 @@ class FaceAccess(ctk.CTk):
         self.lbl_msg_info = ctk.CTkLabel(
             self.ov_msg,
             text="",
-            font=("Helvetica", 12),
+            font=("Helvetica", 18),
             text_color=C_TXT3,
             fg_color="transparent",
         )
@@ -1102,14 +1102,14 @@ class FaceAccess(ctk.CTk):
         content.place(relx=0.5, rely=0.54, anchor="center", relwidth=0.96, relheight=0.92)
 
         ctk.CTkLabel(content, text="Acceso administrativo",
-                     font=("Helvetica", fs(19), "bold"), text_color=C_TXT).pack(pady=(px(20), px(6)))
+                 font=("Helvetica", fs(29), "bold"), text_color=C_TXT).pack(pady=(px(20), px(6)))
         ctk.CTkLabel(content,
                      text="Ingresa tus credenciales y\nacerca tu rostro para confirmar.",
-                     font=("Helvetica", fs(14)), text_color=C_TXT2,
+                 font=("Helvetica", fs(21)), text_color=C_TXT2,
                      justify="center").pack(pady=(0, px(20)))
 
         self.entry_mat_l = ctk.CTkEntry(content, width=px(400), height=px(56),
-                                         placeholder_text="Matrícula", font=("Helvetica", fs(16)))
+                                         placeholder_text="Matrícula", font=("Helvetica", fs(24)))
         self.entry_mat_l.pack(pady=(0, px(12)))
         self.entry_mat_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_mat_l))
 
@@ -1117,7 +1117,7 @@ class FaceAccess(ctk.CTk):
         _fp.pack(pady=(0, px(14)))
         self.entry_pass_l = ctk.CTkEntry(_fp, width=px(350), height=px(56),
                                           placeholder_text="Contraseña", show="*",
-                                          font=("Helvetica", fs(16)))
+                                          font=("Helvetica", fs(24)))
         self.entry_pass_l.pack(side="left")
         self.entry_pass_l.bind("<FocusIn>", lambda e: self._teclado.abrir(self.entry_pass_l))
         self._pass_vis_l = False
@@ -1126,21 +1126,21 @@ class FaceAccess(ctk.CTk):
             self.entry_pass_l.configure(show="" if self._pass_vis_l else "*")
         ctk.CTkButton(_fp, text="👁", width=px(48), height=px(56),
                        fg_color=C_FRAME, hover_color=C_BORDE,
-                       text_color=C_TXT2, font=("Helvetica", fs(16)),
+                       text_color=C_TXT2, font=("Helvetica", fs(24)),
                        command=_toggle_pass_l).pack(side="left", padx=(px(4), 0))
 
         self.lbl_login_msg = ctk.CTkLabel(content, text="",
-                                           font=("Helvetica", fs(13)), text_color=C_WARN)
+                                           font=("Helvetica", fs(20)), text_color=C_WARN)
         self.lbl_login_msg.pack(pady=(0, px(10)))
 
         self.btn_login_confirmar = ctk.CTkButton(
             content, text="Confirmar con rostro", width=px(360), height=px(58),
-            font=("Helvetica", fs(16), "bold"), fg_color=C_OK, text_color=C_BG,
+            font=("Helvetica", fs(24), "bold"), fg_color=C_OK, text_color=C_BG,
             hover_color="#00A88A", corner_radius=12, command=self._login_confirmar)
         self.btn_login_confirmar.pack(pady=(0, px(10)))
 
         ctk.CTkButton(content, text="Cancelar", fg_color="transparent",
-                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", fs(13)),
+                       text_color=C_TXT2, hover_color=C_FRAME, font=("Helvetica", fs(20)),
                        command=lambda: self._confirmar_cancelar(
                            "¿Cancelar el acceso administrativo?")).pack(pady=(0, 0))
 
@@ -2125,7 +2125,6 @@ class FaceAccess(ctk.CTk):
     def _confirmar_cancelar(self, mensaje="¿Estás seguro que quieres cancelar?",
                          accion_si=None):
         """Overlay interno — nunca sale de la ventana de la app."""
-        # Si ya hay uno abierto, cerrarlo primero
         if hasattr(self, "_ov_confirm") and self._ov_confirm.winfo_exists():
             self._ov_confirm.place_forget()
             self._ov_confirm.destroy()
@@ -2135,7 +2134,7 @@ class FaceAccess(ctk.CTk):
             fg_color=C_FRAME,
             corner_radius=14,
             border_width=2,
-            border_color=C_BORDE
+            border_color=C_BORDE,
         )
         self._ov_confirm.place(relx=0.5, rely=0.5, anchor="center",
                                 relwidth=0.64, relheight=0.22)
@@ -2143,7 +2142,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkLabel(
             self._ov_confirm, text="⚠️",
-            font=("Helvetica", 22), fg_color="transparent"
+            font=("Helvetica", 33), fg_color="transparent"
         ).pack(pady=(8, 0))
 
         msg_frame = ctk.CTkFrame(self._ov_confirm, fg_color="transparent")
@@ -2151,7 +2150,7 @@ class FaceAccess(ctk.CTk):
 
         ctk.CTkLabel(
             msg_frame, text=mensaje,
-            font=("Helvetica", 15), text_color=C_TXT,
+            font=("Helvetica", 23), text_color=C_TXT,
             fg_color="transparent", wraplength=260, justify="center"
         ).pack(expand=True)
 
@@ -2173,14 +2172,14 @@ class FaceAccess(ctk.CTk):
         ctk.CTkButton(
             fb, text="Sí, cancelar", width=170, height=52,
             fg_color=C_ERROR, text_color="white",
-            hover_color="#a00000", font=("Helvetica", 15, "bold"),
+            hover_color="#a00000", font=("Helvetica", 23, "bold"),
             command=_si
         ).pack(side="left", padx=3)
 
         ctk.CTkButton(
             fb, text="No, continuar", width=170, height=52,
             fg_color=C_OK, text_color=C_BG,
-            hover_color="#00A88A", font=("Helvetica", 15, "bold"),
+            hover_color="#00A88A", font=("Helvetica", 23, "bold"),
             command=_no
         ).pack(side="left", padx=3)
 

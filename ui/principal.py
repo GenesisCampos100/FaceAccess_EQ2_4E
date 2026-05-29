@@ -127,6 +127,8 @@ class FaceAccess(ctk.CTk):
 
         # ── Construir UI ──────────────────────────────────────────────────────
         self._build_header()
+        self._header_sep = ctk.CTkFrame(self, fg_color=C_BORDE, height=4, corner_radius=0)
+        self._header_sep.pack(fill="x", pady=(0, 4))
         self._build_saludo()
         self._build_video()
         self._build_overlays()
@@ -154,7 +156,7 @@ class FaceAccess(ctk.CTk):
         frame.pack_propagate(False)
 
         left = ctk.CTkFrame(frame, fg_color="transparent")
-        left.pack(side="left", padx=18, pady=0, fill="y")
+        left.pack(side="left", padx=18, pady=(4, 2), fill="y")
 
         logo_size = 38
         if os.path.exists(ICONO_PATH):
@@ -180,16 +182,16 @@ class FaceAccess(ctk.CTk):
         ctk.CTkLabel(text_box, text="Control de Acceso", font=("Helvetica", 12), text_color=C_TXT2).pack(anchor="w")
 
         right = ctk.CTkFrame(frame, fg_color="transparent")
-        right.pack(side="right", padx=18, fill="y")
+        right.pack(side="right", padx=18, pady=(4, 2), fill="y")
         self.lbl_hora = ctk.CTkLabel(right, text="", font=("Helvetica", 26, "bold"), text_color=C_TXT)
-        self.lbl_hora.pack(anchor="e", pady=(14, 0))
+        self.lbl_hora.pack(anchor="e", pady=(10, 0))
         self.lbl_fecha = ctk.CTkLabel(right, text="", font=("Helvetica", 12), text_color=C_TXT2)
         self.lbl_fecha.pack(anchor="e")
 
     def _build_saludo(self):
         """Construir barra superior secundaria con estado y contadores."""
-        self.frame_saludo = ctk.CTkFrame(self, fg_color=C_FOOT, corner_radius=0, height=H_SALUDO)
-        self.frame_saludo.pack(fill="x")
+        self.frame_saludo = ctk.CTkFrame(self, fg_color=C_FOOT, corner_radius=0, height=H_SALUDO + 6)
+        self.frame_saludo.pack(fill="x", pady=(1, 0))
         self.frame_saludo.pack_propagate(False)
         self.lbl_saludo = ctk.CTkLabel(self.frame_saludo, text="", font=("Helvetica", sf(13, self)), text_color=C_TXT2)
         self.lbl_saludo.pack(side="left", padx=18)
@@ -216,18 +218,18 @@ class FaceAccess(ctk.CTk):
 
     def _build_overlays(self):
         """Construir overlays secundarios."""
-        self.ov_msg = ctk.CTkFrame(self.frame_video, corner_radius=0, fg_color="#0D1E2D", height=48)
+        self.ov_msg = ctk.CTkFrame(self.frame_video, corner_radius=0, fg_color="#0D1E2D", height=52)
         self.ov_msg.pack_propagate(False)
-        self.lbl_msg_icono = ctk.CTkLabel(self.ov_msg, text="", font=("Helvetica", 20), fg_color="transparent", width=36)
-        self.lbl_msg_icono.place(relx=0, rely=0.5, anchor="w", x=12)
+        self.lbl_msg_icono = ctk.CTkLabel(self.ov_msg, text="", font=("Helvetica", 20), fg_color="transparent", width=44)
+        self.lbl_msg_icono.place(relx=0, rely=0.5, anchor="w", x=14)
         self._msg_texts = ctk.CTkFrame(self.ov_msg, fg_color="transparent")
-        self._msg_texts.place(relx=0, rely=0.5, anchor="w", x=52)
+        self._msg_texts.place(relx=0, rely=0.5, anchor="w", x=80)
         self.lbl_msg_titulo = ctk.CTkLabel(self._msg_texts, text="", font=("Helvetica", 13, "bold"), text_color=C_TXT, fg_color="transparent")
         self.lbl_msg_titulo.pack(anchor="w")
         self.lbl_msg_nombre = ctk.CTkLabel(self._msg_texts, text="", font=("Helvetica", 11), text_color=C_TXT2, fg_color="transparent")
         self.lbl_msg_nombre.pack(anchor="w")
         self.lbl_msg_info = ctk.CTkLabel(self.ov_msg, text="", font=("Helvetica", 10), text_color=C_TXT3, fg_color="transparent")
-        self.lbl_msg_info.place(relx=1.0, rely=0.3, anchor="e", x=-12)
+        self.lbl_msg_info.place(relx=1.0, rely=0.3, anchor="e", x=-16)
         self.prog_msg = ctk.CTkProgressBar(self.ov_msg, height=3, corner_radius=0, fg_color=C_BORDE, progress_color=C_OK)
         self.prog_msg.place(relx=0, rely=1.0, anchor="sw", relwidth=1)
         self.prog_msg.set(1.0)
@@ -269,12 +271,12 @@ class FaceAccess(ctk.CTk):
         self.ov_registro = ctk.CTkFrame(self.frame_video, fg_color="#0F1923", corner_radius=0)
         ctk.CTkLabel(
             self.ov_registro, text="Registrar nuevo usuario",
-            font=("Helvetica", sf(60, self), "bold"), text_color=C_TXT
+            font=("Helvetica", sf(90, self), "bold"), text_color=C_TXT
         ).pack(pady=(s(12, self), s(6, self)))
 
         self.lbl_reg_op = ctk.CTkLabel(
             self.ov_registro, text="",
-            font=("Helvetica", sf(13, self)), text_color=C_OK
+            font=("Helvetica", sf(20, self)), text_color=C_OK
         )
         self.lbl_reg_op.pack(pady=(0, s(8, self)))
 
@@ -312,12 +314,12 @@ class FaceAccess(ctk.CTk):
                 self._grupo_frame = f
                 f.grid_remove()
 
-            ctk.CTkLabel(f, text=lbl, font=("Helvetica", sf(13, self)), text_color=C_TXT2).pack(anchor="w")
+            ctk.CTkLabel(f, text=lbl, font=("Helvetica", sf(20, self)), text_color=C_TXT2).pack(anchor="w")
 
             if key in ("contrasenia", "contrasenia2"):
                 fp = ctk.CTkFrame(f, fg_color="transparent")
                 fp.pack(fill="x")
-                e = ctk.CTkEntry(fp, width=sw(0.88, self), height=s(60, self), font=("Helvetica", sf(22, self)), show="*")
+                e = ctk.CTkEntry(fp, width=sw(0.88, self), height=s(60, self), font=("Helvetica", sf(33, self)), show="*")
                 e.pack(side="left", fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
                 vis = [False]
@@ -329,11 +331,11 @@ class FaceAccess(ctk.CTk):
                 ctk.CTkButton(
                     fp, text="👁", width=s(32, self), height=s(34, self),
                     fg_color=C_FRAME, hover_color=C_BORDE,
-                    text_color=C_TXT2, font=("Helvetica", sf(13, self)),
+                    text_color=C_TXT2, font=("Helvetica", sf(20, self)),
                     command=_toggle
                 ).pack(side="left", padx=(s(6, self), 0))
             else:
-                e = ctk.CTkEntry(f, width=sw(0.92, self), height=s(60, self), font=("Helvetica", sf(22, self)))
+                e = ctk.CTkEntry(f, width=sw(0.92, self), height=s(60, self), font=("Helvetica", sf(33, self)))
                 e.pack(fill="x", expand=True)
                 e.bind("<FocusIn>", lambda ev, entry=e: self._teclado.abrir(entry))
 
@@ -341,27 +343,27 @@ class FaceAccess(ctk.CTk):
 
         rol_frame = ctk.CTkFrame(form_grid, fg_color="transparent")
         rol_frame.grid(row=len(campos), column=0, columnspan=2, padx=s(12, self), pady=s(8, self), sticky="w")
-        ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", sf(13, self)), text_color=C_TXT2).pack(anchor="w")
+        ctk.CTkLabel(rol_frame, text="Rol", font=("Helvetica", sf(20, self)), text_color=C_TXT2).pack(anchor="w")
         self.combo_rol = ctk.CTkComboBox(
             rol_frame,
             width=sw(0.8, self),
             height=s(48, self),
-            font=("Helvetica", sf(22, self)),
+            font=("Helvetica", sf(33, self)),
             values=["ALUMNO", "PERSONAL_ESCOLAR"],
             command=self._actualizar_campos_rol,
         )
         self.combo_rol.pack()
         self.combo_rol.set("ALUMNO")
 
-        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="", font=("Helvetica", sf(14, self)), text_color=C_ERROR)
+        self.lbl_reg_err = ctk.CTkLabel(self.ov_registro, text="", font=("Helvetica", sf(21, self)), text_color=C_ERROR)
         self.lbl_reg_err.pack(pady=s(4, self))
 
         fb = ctk.CTkFrame(self.ov_registro, fg_color="transparent")
         fb.pack(pady=s(12, self))
         ctk.CTkButton(
-            fb, text="Continuar →", width=sw(0.5, self), height=s(44, self), fg_color=C_OK,
+            fb, text="Continuar →", width=sw(0.5, self), height=s(56, self), fg_color=C_OK,
             text_color=C_BG, hover_color="#00A88A",
-            font=("Helvetica", sf(22, self), "bold"),
+            font=("Helvetica", sf(33, self), "bold"),
             command=self._reg_continuar
         ).pack(side="left", padx=s(6, self))
 
